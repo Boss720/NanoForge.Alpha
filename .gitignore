@@ -1,0 +1,90 @@
+# Dependencies & Package Managers (pnpm-lock.yaml is authoritative)
+node_modules/
+package-lock.json
+yarn.lock
+
+# Build & Compilation Outputs
+dist/
+dist-ssr/
+build/
+.turbo/
+*.local
+*.tsbuildinfo
+
+# Release Distribution Binaries & Archives (F3.3)
+release/*.zip
+release/*.exe
+release/*.blob
+release/*.tgz
+release/*.tar.gz
+release/sea-config.json
+release/test.zip
+release/NanoForge.bat
+release/NanoForge.exe
+release/README.txt
+release/bundle/
+release/dist/
+release/.test-temp/
+release/desktop*/
+release/_quarantine/
+!release/install-nanoforge.ps1
+!release/install-nanoforge.bat
+!release/uninstall-nanoforge.ps1
+
+# Binary Executables and Compressed Archives
+*.exe
+*.dll
+*.dylib
+*.so
+*.zip
+*.tar.gz
+*.tgz
+*.blob
+
+# Logs & Debug Traces
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Test Coverage & Reports
+coverage/
+test-results/
+playwright-report/
+
+# Databases and Temporary SQLite Artifacts
+*.db
+*.sqlite
+*.sqlite3
+*.sqlite-journal
+*.db-journal
+*.db-wal
+*.db-shm
+temp_*.db
+
+# Agent Platform Runtime Artifacts
+.nanoforge/runs/
+.nanoforge/sessions/
+
+# Local Codex/subagent working records
+.agents/
+
+# Temporary Scratch and Debug Files
+*.pyc
+__pycache__/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Editor Configurations
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln

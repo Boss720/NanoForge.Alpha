@@ -1,0 +1,72 @@
+name: Verify
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  quality-gate:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.4
+          run_install: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Dependency Audit Scan
+        run: pnpm audit --audit-level=high
+
+      - name: Lint
+        run: pnpm run lint
+
+      - name: Typecheck protocol package
+        run: pnpm run typecheck:protocol
+
+      - name: Typecheck agent host
+        run: pnpm run typecheck:host
+
+      - name: Typecheck core package
+        run: pnpm run typecheck:core
+
+      - name: Typecheck SDK package
+        run: pnpm run typecheck:sdk
+
+      - name: Typecheck web app
+        run: pnpm exec tsc -p tsconfig.app.json
+
+      - name: Unit tests (protocol)
+        run: pnpm run test:protocol
+
+      - name: Unit tests (agent host)
+        run: pnpm run test:host
+
+      - name: Unit tests (core)
+        run: pnpm run test:core
+
+      - name: Unit tests (SDK)
+        run: pnpm run test:sdk
+
+      - name: Unit tests (web)
+        run: pnpm test
+
+      - name: End-to-End Integration tests
+        run: pnpm run test:e2e
+
+      - name: Build
+        run: pnpm run build

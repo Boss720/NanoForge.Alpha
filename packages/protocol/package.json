@@ -1,0 +1,104 @@
+{
+  "name": "@nanoforge/protocol",
+  "version": "0.1.0",
+  "description": "Pure isomorphic wire protocol types, Zod schemas, and state machines for NanoForge",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./lifecycle": {
+      "types": "./src/lifecycle.ts",
+      "import": "./src/lifecycle.ts",
+      "default": "./src/lifecycle.ts"
+    },
+    "./stream": {
+      "types": "./src/stream.ts",
+      "import": "./src/stream.ts",
+      "default": "./src/stream.ts"
+    },
+    "./cancellation": {
+      "types": "./src/cancellation.ts",
+      "import": "./src/cancellation.ts",
+      "default": "./src/cancellation.ts"
+    },
+    "./tools": {
+      "types": "./src/tools.ts",
+      "import": "./src/tools.ts",
+      "default": "./src/tools.ts"
+    },
+    "./telemetry": {
+      "types": "./src/telemetry.ts",
+      "import": "./src/telemetry.ts",
+      "default": "./src/telemetry.ts"
+    },
+    "./plan": {
+      "types": "./src/plan.ts",
+      "import": "./src/plan.ts",
+      "default": "./src/plan.ts"
+    },
+    "./commands": {
+      "types": "./src/commands.ts",
+      "import": "./src/commands.ts",
+      "default": "./src/commands.ts"
+    },
+    "./routing": {
+      "types": "./src/routing.ts",
+      "import": "./src/routing.ts",
+      "default": "./src/routing.ts"
+    },
+    "./artifacts": {
+      "types": "./src/artifacts.ts",
+      "import": "./src/artifacts.ts",
+      "default": "./src/artifacts.ts"
+    },
+    "./terminal": {
+      "types": "./src/terminal.ts",
+      "import": "./src/terminal.ts",
+      "default": "./src/terminal.ts"
+    },
+    "./subagents": {
+      "types": "./src/subagents.ts",
+      "import": "./src/subagents.ts",
+      "default": "./src/subagents.ts"
+    },
+    "./tasks": {
+      "types": "./src/tasks.ts",
+      "import": "./src/tasks.ts",
+      "default": "./src/tasks.ts"
+    },
+    "./memory": {
+      "types": "./src/memory.ts",
+      "import": "./src/memory.ts",
+      "default": "./src/memory.ts"
+    },
+    "./*": {
+      "types": "./src/*.ts",
+      "import": "./src/*.ts",
+      "default": "./src/*.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "eslint src"
+  },
+  "dependencies": {
+    "zod": "^4.3.5"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "typescript": "~5.9.3",
+    "vitest": "^4.1.10"
+  }
+}

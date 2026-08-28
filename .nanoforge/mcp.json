@@ -1,0 +1,12 @@
+{
+  "servers": [
+    {
+      "name": "github-example",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": { "GITHUB_TOKEN": "env:GITHUB_TOKEN" },
+      "tools": ["get_file_contents", "search_repositories", "create_or_update_file"],
+      "enabled": false
+    }
+  ]
+}

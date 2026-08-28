@@ -1,0 +1,528 @@
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+importers:
+
+  .:
+    dependencies:
+      '@hookform/resolvers':
+        specifier: ^5.2.2
+        version: 5.9.1(@standard-schema/spec@1.1.0)(ajv@8.20.0)(react-hook-form@7.85.0(react@19.2.8))(zod@4.4.3)
+      '@nanoforge/protocol':
+        specifier: workspace:*
+        version: link:packages/protocol
+      '@radix-ui/react-accordion':
+        specifier: ^1.2.12
+        version: 1.2.20(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      '@radix-ui/react-alert-dialog':
+        specifier: ^1.1.15
+        version: 1.1.23(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      '@radix-ui/react-aspect-ratio':
+        specifier: ^1.1.8
+        version: 1.1.15(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      '@radix-ui/react-avatar':
+        specifier: ^1.1.11
+        version: 1.2.6(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      '@radix-ui/react-checkbox':
+        specifier: ^1.3.3
+        version: 1.3.11(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      '@radix-ui/react-collapsible':
+        specifier: ^1.1.12
+        version: 1.1.20(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      '@radix-ui/react-context-menu':
+        specifier: ^2.2.16
+        version: 2.3.7(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      '@radix-ui/react-dialog':
+        specifier: ^1.1.15
+        version: 1.1.23(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      '@radix-ui/react-dropdown-menu':
+        specifier: ^2.1.16
+        version: 2.1.24(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      '@radix-ui/react-hover-card':
+        specifier: ^1.1.15
+        version: 1.1.23(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      '@radix-ui/react-label':
+        specifier: ^2.1.8
+        version: 2.1.15(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      '@radix-ui/react-menubar':
+        specifier: ^1.1.16
+        version: 1.1.24(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      '@radix-ui/react-navigation-menu':
+        specifier: ^1.2.14
+        version: 1.2.22(@types/re…116969 tokens truncated…espondJson(result.status, result.payload);
+      });
+      return;
+    }
+    if (api.workspaceBroker && brokerGetPaths[requestPath] && req.method === 'GET') {
+      if (!isAuthorized()) { rejectUnauthorized(); return; }
+      const requestId = typeof req.headers['x-request-id'] === 'string' ? req.headers['x-request-id'] : '';
+      const result = api.workspaceBroker.query(brokerGetPaths[requestPath], requestId);
+      respondJson(result.status, result.payload);
+      return;
+    }
+    const recentMatch = /^\/api\/workspace\/recent\/([^/]+)$/.exec(requestPath);
+    if (api.workspacePicker && requestPath === '/api/workspace/pick' && req.method === 'POST') {
+      if (!isAuthorized()) { rejectUnauthorized(); return; }
+      Promise.resolve(api.workspacePicker.pick()).then((result) => respondJson(200, result), () => respondJson(503, { error: 'workspace picker unavailable' }));
+      return;
+    }
+    if (api.workspaceRegistry && requestPath === '/api/workspace/recent' && req.method === 'GET') {
+      if (!isAuthorized()) { rejectUnauthorized(); return; }
+      // Keep the legacy route available while ensuring it cannot disclose the
+      // registry's private canonical paths.
+      respondJson(200, { workspaces: api.workspaceRegistry.list().map(legacyRecentDescriptor) });
+      return;
+    }
+    if (api.workspaceRegistry && recentMatch && req.method === 'PATCH') {
+      if (!isAuthorized()) { rejectUnauthorized(); return; }
+      readJsonBody((payload) => {
+        if (!payload || typeof payload.pinned !== 'boolean') { respondJson(400, { error: 'pinned must be boolean' }); return; }
+        const workspace = api.workspaceRegistry.pin(recentMatch[1], payload.pinned);
+        if (!workspace) { respondJson(404, { error: 'workspace not found' }); return; }
+        respondJson(200, workspace);
+      });
+      return;
+    }
+    if (api.workspaceRegistry && recentMatch && req.method === 'DELETE') {
+      if (!isAuthorized()) { rejectUnauthorized(); return; }
+      if (!api.workspaceRegistry.remove(recentMatch[1])) { respondJson(404, { error: 'workspace not found' }); return; }
+      respondJson(200, { removed: true });
+      return;
+    }
+    if (req.method === 'POST' && requestPath === '/api/workspace' && typeof api.onWorkspaceOpen === 'function') {
+      if (!isAuthorized()) {
+        rejectUnauthorized();
+        return;
+      }
+      let body = '';
+      req.setEncoding('utf8');
+      req.on('data', (chunk) => {
+        body += chunk;
+        if (body.length > 16 * 1024) req.destroy();
+      });
+      req.on('end', async () => {
+        try {
+          const payload = JSON.parse(body || '{}');
+          if (typeof payload.path !== 'string' || !payload.path.trim()) throw new Error('workspace path is required');
+          const result = await api.onWorkspaceOpen(payload.path.trim());
+          res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+          res.end(JSON.stringify(result));
+        } catch (error) {
+          res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
+        }
+      });
+      return;
+    }
+    // Decode once, then reject malformed or NUL-containing request paths.
+    const rawUrl = req.url || '/';
+    const rawPath = rawUrl.split(/[?#]/)[0] || '/';
+    let cleanPath;
+    try {
+      cleanPath = decodeURIComponent(rawPath);
+    } catch {
+      res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end('400 Bad Request');
+      return;
+    }
+    if (rawUrl.includes('\0') || cleanPath.includes('\0')) {
+      res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end('400 Bad Request');
+      return;
+    }
+
+    // Treat both URL separators as path separators before resolving. This
+    // protects POSIX test/dev hosts from Windows-style traversal probes too.
+    const normalizedInput = cleanPath.replace(/[\\/]+/g, path.sep);
+    let relativeTarget = normalizedInput;
+    while (relativeTarget.startsWith(path.sep)) relativeTarget = relativeTarget.slice(path.sep.length);
+    if (!relativeTarget) relativeTarget = 'index.html';
+    const candidateFile = path.resolve(resolvedDistRoot, relativeTarget);
+
+    if (!isPathWithinRoot(candidateFile, resolvedDistRoot)) {
+      res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end('403 Forbidden');
+      return;
+    }
+
+    fs.stat(candidateFile, (err, stats) => {
+      if (!err && stats.isFile()) {
+        const stream = fs.createReadStream(candidateFile);
+        res.writeHead(200, {
+          'Content-Type': getMimeType(candidateFile),
+          'Content-Length': stats.size,
+          'X-Content-Type-Options': 'nosniff',
+        });
+        stream.pipe(res);
+        return;
+      }
+
+      // SPA fallback to index.html for client-side routing
+      const indexFile = path.join(resolvedDistRoot, 'index.html');
+      fs.stat(indexFile, (indexErr, indexStats) => {
+        if (!indexErr && indexStats.isFile()) {
+          const indexStream = fs.createReadStream(indexFile);
+          res.writeHead(200, {
+            'Content-Type': 'text/html; charset=utf-8',
+            'Content-Length': indexStats.size,
+            'Cache-Control': 'no-cache',
+            'X-Content-Type-Options': 'nosniff',
+          });
+          indexStream.pipe(res);
+          return;
+        }
+
+        res.writeHead(503, { 'Content-Type': 'text/html; charset=utf-8' });
+        res.end(`
+          <!DOCTYPE html>
+          <html>
+            <head><title>NanoForge - Build Required</title></head>
+            <body style="font-family: sans-serif; background: #0f172a; color: #f8fafc; padding: 2rem;">
+              <h1 style="color: #f59e0b;">NanoForge Production Build Not Found</h1>
+              <p>The web UI assets were not found at <code>${distRoot}</code>.</p>
+              <p>Please compile the frontend using: <code>npm run build</code></p>
+            </body>
+          </html>
+        `);
+      });
+    });
+  });
+}
+
+function isPathWithinRoot(candidatePath, rootPath) {
+  const relative = path.relative(path.resolve(rootPath), path.resolve(candidatePath));
+  return relative === '' || (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
+}
+
+function openBrowser(url) {
+  const platform = process.platform;
+  let command = '';
+
+  if (platform === 'win32') {
+    command = `start "" "${url}"`;
+  } else if (platform === 'darwin') {
+    command = `open "${url}"`;
+  } else {
+    command = `xdg-open "${url}"`;
+  }
+
+  exec(command, (err) => {
+    if (err) {
+      console.warn(`[launcher] Note: Could not auto-launch browser automatically: ${err.message}`);
+      console.log(`[launcher] Please navigate manually to: ${url}`);
+    }
+  });
+}
+
+async function startLauncher(options = {}) {
+  const config = Object.assign({}, parseArgs(), options);
+  const childEnvironment = config.childEnvironment || {};
+
+  if (config.help) {
+    console.log(`
+NanoForge Standalone Dual Launcher
+Usage: node nanoforge-launcher.cjs [options]
+
+Options:
+  --port, -p, --ui-port <port>    Web UI static server port (default: 4173)
+  --host-port <port>              Agent host daemon port (default: 4174)
+  --token, -t <token>             Authentication session token (default: generated)
+  --allow-workspace-writes        Permit reviewed file writes to the local workspace root (default: disabled)
+  --root <path>                   Custom static dist root directory
+  --workspace <path>              Canonical local workspace for host startup
+  --no-open, --headless           Do not automatically open default browser
+  --dry-run                       Validate configuration and exit cleanly
+  --help, -h                      Show this help message
+`);
+    return { status: 'help' };
+  }
+
+  const allowWorkspaceWrites = (Boolean(config.allowWorkspaceWrites) || process.env.NANOFORGE_ALLOW_WORKSPACE_WRITES === '1') ? '1' : '0';
+  const distRoot = resolveDistRoot(config.distRoot);
+  const hostEntry = resolveHostEntry();
+  // Normal launcher runs own real local services. Tests may still inject
+  // isolated implementations through the existing option hooks.
+  const workspacePicker = config.workspacePicker || createWindowsFolderPicker();
+  const workspaceRegistry = config.workspaceRegistry || createWorkspaceRegistry();
+  let initialWorkspaceEntry = null;
+  if (config.workspaceRoot) {
+    const workspaceRoot = path.resolve(config.workspaceRoot);
+    let workspaceStat;
+    try {
+      workspaceStat = fs.statSync(workspaceRoot);
+    } catch {
+      throw new Error(`Workspace does not exist: ${workspaceRoot}`);
+    }
+    if (!workspaceStat.isDirectory()) {
+      throw new Error(`Workspace is not a directory: ${workspaceRoot}`);
+    }
+    config.workspaceRoot = workspaceRoot;
+    initialWorkspaceEntry = workspaceRegistry.open(workspaceRoot);
+  }
+
+  console.log('===================================================');
+  console.log('       NanoForge Phase 6 - Platform Launcher       ');
+  console.log('===================================================');
+  console.log(`[launcher] UI Root:     ${distRoot}`);
+  console.log(`[launcher] Host Entry:  ${hostEntry || 'None found (will start UI only)'}`);
+  console.log(`[launcher] Host Port:   ${config.hostPort}`);
+  console.log(`[launcher] UI Port:     ${config.uiPort}`);
+  console.log(`[launcher] Workspace:   ${config.workspaceRoot ? 'configured (private)' : 'not configured'}`);
+  console.log(`[launcher] Writes:      ${allowWorkspaceWrites === '1' ? 'ENABLED (opt-in)' : 'DISABLED (default)'}`);
+  console.log(`[launcher] Auth Token:  ${config.token.slice(0, 8)}... (redacted)`);
+
+  let hostProcess = null;
+
+  // 1. Start Fastify Agent Host daemon if host entry exists
+  if (hostEntry && !config.dryRun) {
+    const isTypeScript = hostEntry.endsWith('.ts');
+    const isWindows = process.platform === 'win32';
+
+    const env = buildChildEnvironment({
+      PORT: String(config.hostPort),
+      TOKEN: config.token,
+      HOST: '127.0.0.1',
+      NANOFORGE_ALLOWED_ORIGINS: `http://127.0.0.1:${config.uiPort}`,
+      NANOFORGE_WORKSPACE: config.workspaceRoot || process.cwd(),
+      NANOFORGE_ALLOW_WORKSPACE_WRITES: allowWorkspaceWrites,
+      NANOFORGE_WORKSPACE_GENERATION: '1',
+      ...childEnvironment,
+    });
+
+    if (isTypeScript) {
+      const tsxBin = path.join(__dirname, '..', 'node_modules', '.bin', isWindows ? 'tsx.cmd' : 'tsx');
+      const cmd = fs.existsSync(tsxBin) ? tsxBin : (isWindows ? 'npx.cmd' : 'npx');
+      const args = fs.existsSync(tsxBin) ? [hostEntry] : ['tsx', hostEntry];
+
+      hostProcess = spawn(cmd, args, {
+        env,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        shell: isWindows,
+        windowsHide: true,
+      });
+    } else {
+      // When running as a Node SEA binary, process.execPath points to NanoForge.exe,
+      // NOT to node.exe. We must find the real node.exe to spawn subprocesses.
+      hostProcess = spawn(resolveNodeExecutable(), [hostEntry], {
+        env,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        shell: false,
+        windowsHide: true,
+      });
+    }
+
+    if (hostProcess) {
+      hostProcess.stdout?.on('data', (data) => {
+        const text = data.toString().trim();
+        if (text) console.log(`[agent-host] ${text}`);
+      });
+
+      hostProcess.stderr?.on('data', (data) => {
+        const text = data.toString().trim();
+        if (text) console.error(`[agent-host] ${text}`);
+      });
+
+      hostProcess.on('error', (err) => {
+        console.error(`[launcher] Failed to spawn agent host: ${err.message}`);
+      });
+
+      hostProcess.on('exit', (code, signal) => {
+        if (code !== 0 && code !== null) {
+          console.warn(`[launcher] Agent host process exited with code ${code} (${signal || 'none'})`);
+        }
+      });
+    }
+  }
+
+  const spawnReplacementHost = (workspaceRoot, workspaceGeneration = 1) => {
+    if (!hostEntry) throw new Error('Agent host entry is unavailable');
+    const env = buildChildEnvironment({
+      PORT: String(config.hostPort),
+      TOKEN: config.token,
+      HOST: '127.0.0.1',
+      NANOFORGE_ALLOWED_ORIGINS: `http://127.0.0.1:${config.uiPort}`,
+      NANOFORGE_WORKSPACE: workspaceRoot,
+      NANOFORGE_ALLOW_WORKSPACE_WRITES: allowWorkspaceWrites,
+      NANOFORGE_WORKSPACE_GENERATION: String(workspaceGeneration),
+      ...childEnvironment,
+    });
+    const isTypeScript = hostEntry.endsWith('.ts');
+    const isWindows = process.platform === 'win32';
+    if (isTypeScript) {
+      const tsxBin = path.join(__dirname, '..', 'node_modules', '.bin', isWindows ? 'tsx.cmd' : 'tsx');
+      const cmd = fs.existsSync(tsxBin) ? tsxBin : (isWindows ? 'npx.cmd' : 'npx');
+      const args = fs.existsSync(tsxBin) ? [hostEntry] : ['tsx', hostEntry];
+      return spawn(cmd, args, { env, stdio: ['ignore', 'pipe', 'pipe'], shell: isWindows, windowsHide: true });
+    }
+    return spawn(resolveNodeExecutable(), [hostEntry], { env, stdio: ['ignore', 'pipe', 'pipe'], shell: false, windowsHide: true });
+  };
+
+  const restartHostForWorkspace = async (requestedRoot, workspaceGeneration = 1) => {
+    const workspaceRoot = path.resolve(requestedRoot);
+    const stats = fs.statSync(workspaceRoot);
+    if (!stats.isDirectory()) throw new Error(`Workspace is not a directory: ${workspaceRoot}`);
+    if (hostProcess && !hostProcess.killed) {
+      await new Promise((resolve) => {
+        let settled = false;
+        const finish = () => { if (!settled) { settled = true; resolve(); } };
+        hostProcess.once('exit', finish);
+        if (process.platform === 'win32' && hostProcess.pid) exec(`taskkill /pid ${hostProcess.pid} /T /F`, finish);
+        else hostProcess.kill('SIGTERM');
+        setTimeout(finish, 5000);
+      });
+    }
+    config.workspaceRoot = workspaceRoot;
+    hostProcess = spawnReplacementHost(workspaceRoot, workspaceGeneration);
+    hostProcess.stdout?.on('data', (data) => {
+      const text = data.toString().trim();
+      if (text) console.log(`[agent-host] ${text}`);
+    });
+    hostProcess.stderr?.on('data', (data) => {
+      const text = data.toString().trim();
+      if (text) console.error(`[agent-host] ${text}`);
+    });
+    await new Promise((resolve, reject) => {
+      const deadline = Date.now() + 5000;
+      const probe = () => {
+        const request = http.get(`http://127.0.0.1:${config.hostPort}/health`, (response) => {
+          response.resume();
+          if (response.statusCode === 200) { resolve(); return; }
+          retry();
+        });
+        request.on('error', retry);
+        request.setTimeout(500, () => { request.destroy(); retry(); });
+      };
+      const retry = () => {
+        if (Date.now() >= deadline) { reject(new Error('The replacement agent host did not become ready')); return; }
+        setTimeout(probe, 100);
+      };
+      probe();
+    });
+    return { activated: true };
+  };
+
+  const revealWorkspace = async (targetPath) => {
+    const command = process.platform === 'win32' ? 'explorer.exe' : process.platform === 'darwin' ? 'open' : 'xdg-open';
+    const child = spawn(command, [targetPath], { shell: false, windowsHide: true, stdio: 'ignore' });
+    await new Promise((resolve, reject) => {
+      child.once('error', reject);
+      child.once('spawn', resolve);
+    });
+  };
+  const workspaceBroker = config.workspaceBroker || createWorkspaceBroker({
+    picker: workspacePicker,
+    registry: workspaceRegistry,
+    activateWorkspace: restartHostForWorkspace,
+    revealWorkspace,
+    hostPort: config.hostPort,
+    token: config.token,
+    activeEntry: initialWorkspaceEntry,
+    allowWorkspaceWrites,
+  });
+
+  // 2. Start Web UI Static Server
+  const uiServer = createStaticServer(distRoot, {
+    token: config.token,
+    onWorkspaceOpen: restartHostForWorkspace,
+    workspacePicker,
+    workspaceRegistry,
+    workspaceBroker,
+  });
+
+  const serverPromise = new Promise((resolve, reject) => {
+    uiServer.once('error', (err) => {
+      console.error(`[launcher] UI Server Error: ${err.message}`);
+      reject(err);
+    });
+
+    uiServer.listen(config.uiPort, '127.0.0.1', () => {
+      const launchUrl = `http://127.0.0.1:${config.uiPort}/?hostPort=${config.hostPort}&token=${encodeURIComponent(config.token)}`;
+      console.log(`[launcher] Web UI ready at:   http://127.0.0.1:${config.uiPort}`);
+      console.log(`[launcher] Agent Host URL:   ws://127.0.0.1:${config.hostPort}/agent?token=${config.token.slice(0, 8)}...`);
+      console.log(`[launcher] Browser URL:      http://127.0.0.1:${config.uiPort} (session parameters redacted)`);
+      console.log('===================================================');
+
+      if (!config.noOpen && !config.dryRun) {
+        openBrowser(launchUrl);
+      }
+
+      resolve({
+        uiServer,
+        hostProcess,
+        launchUrl,
+        config,
+        distRoot,
+      });
+    });
+  });
+
+  const handle = await serverPromise;
+
+  const shutdown = async () => {
+    console.log('\n[launcher] Shutting down NanoForge services...');
+    if (hostProcess && !hostProcess.killed) {
+      try {
+        if (process.platform === 'win32' && hostProcess.pid) {
+          exec(`taskkill /pid ${hostProcess.pid} /T /F`, () => {});
+        } else {
+          hostProcess.kill('SIGTERM');
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+
+    if (uiServer) {
+      await new Promise((res) => uiServer.close(res));
+    }
+    console.log('[launcher] NanoForge stopped cleanly.');
+  };
+
+  process.once('SIGINT', async () => {
+    await shutdown();
+    process.exit(0);
+  });
+
+  process.once('SIGTERM', async () => {
+    await shutdown();
+    process.exit(0);
+  });
+
+  if (config.dryRun) {
+    console.log('[launcher] Dry run completed successfully.');
+    await shutdown();
+  }
+
+  return {
+    ...handle,
+    shutdown,
+  };
+}
+
+// Direct CLI invocation check
+if (require.main === module) {
+  startLauncher().catch((err) => {
+    console.error(`[launcher] Fatal initialization error:`, err);
+    process.exit(1);
+  });
+}
+
+module.exports = {
+  startLauncher,
+  resolveDistRoot,
+  resolveHostEntry,
+  getMimeType,
+  generateToken,
+  parseArgs,
+  createStaticServer,
+  createWorkspaceBroker,
+  resolveLauncherSidecar,
+  isOpaqueWorkspaceId,
+  isSafeWorkspaceRelativePath,
+  isPathWithinRoot,
+  buildChildEnvironment,
+  MIME_TYPES,
+};
