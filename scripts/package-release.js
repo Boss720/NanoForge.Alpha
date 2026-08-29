@@ -12,7 +12,7 @@
  *    - Standalone batch launcher (`NanoForge.bat`)
  *    - Standalone Windows executable (`NanoForge.exe`)
  *    - Release metadata (`package.json`, `README.txt`)
- * 4. Compresses release package into `release/NanoForge-v0.6.0-windows-x64.zip`.
+ * 4. Compresses release package into `release/NanoForge-v<version>-windows-x64.zip`.
  */
 
 import fs from 'node:fs';
@@ -31,12 +31,15 @@ export const HOST_DIST_DIR = path.join(ROOT_DIR, 'apps', 'agent-host', 'dist');
 export const RELEASE_DIR = path.join(ROOT_DIR, 'release');
 export const BUNDLE_DIR = path.join(RELEASE_DIR, 'bundle');
 export const PROTOCOL_SRC = path.join(ROOT_DIR, 'packages', 'protocol', 'src');
+export const PROJECT_VERSION = JSON.parse(
+  fs.readFileSync(path.join(ROOT_DIR, 'package.json'), 'utf8'),
+).version;
 
 export function parseCliArgs(argv = process.argv.slice(2)) {
   const options = {
     skipBuild: false,
     dryRun: false,
-    version: '0.6.0',
+    version: PROJECT_VERSION,
     help: false,
   };
 
@@ -155,7 +158,7 @@ if %ERRORLEVEL% NEQ 0 (
   fs.writeFileSync(destPath, content, 'utf8');
 }
 
-export function generateReleaseReadme(destPath, version = '0.6.0') {
+export function generateReleaseReadme(destPath, version = PROJECT_VERSION) {
   const content = `===================================================
  NanoForge v${version} - Autonomous Swarm Platform
 ===================================================
@@ -227,7 +230,7 @@ NanoForge Release Packager
 Usage: node package-release.js [options]
 
 Options:
-  --version, -v <version>    Release version tag (default: 0.6.0)
+  --version, -v <version>    Release version tag (default: ${PROJECT_VERSION})
   --skip-build               Skip frontend and backend build steps
   --dry-run                  Prepare release manifests without generating full archive
   --help, -h                 Display help information
