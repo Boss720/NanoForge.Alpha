@@ -50,6 +50,11 @@ jobs:
       - name: Typecheck web app
         run: pnpm exec tsc -p tsconfig.app.json
 
+      # Packaging tests serve and bundle the production UI, so build it before
+      # running the test suites rather than depending on a stale local dist.
+      - name: Build
+        run: pnpm run build
+
       - name: Unit tests (protocol)
         run: pnpm run test:protocol
 
@@ -67,6 +72,3 @@ jobs:
 
       - name: End-to-End Integration tests
         run: pnpm run test:e2e
-
-      - name: Build
-        run: pnpm run build

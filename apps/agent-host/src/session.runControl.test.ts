@@ -21,6 +21,10 @@ interface WsLike {
     cb: (event: { data: unknown }) => void,
     opts?: { once?: boolean },
   ): void;
+  removeEventListener(
+    type: "message",
+    cb: (event: { data: unknown }) => void,
+  ): void;
   send(data: string): void;
   close(): void;
 }
@@ -58,13 +62,18 @@ function waitForOpen(ws: WsLike): Promise<void> {
   });
 }
 
-function nextMessage(ws: WsLike): Promise<Record<string, unknown>> {
+function nextMessage(
+  ws: WsLike,
+  matches: (message: Record<string, unknown>) => boolean = () => true,
+): Promise<Record<string, unknown>> {
   return new Promise((resolve) => {
-    ws.addEventListener(
-      "message",
-      (event) => resolve(JSON.parse(String(event.data))),
-      { once: true },
-    );
+    const onMessage = (event: { data: unknown }) => {
+      const message = JSON.parse(String(event.data)) as Record<string, unknown>;
+      if (!matches(message)) return;
+      ws.removeEventListener("message", onMessage);
+      resolve(message);
+    };
+    ws.addEventListener("message", onMessage);
   });
 }
 
@@ -90,7 +99,7 @@ describe("Host session run-control wire acknowledgements", () => {
     const ws = new NativeWebSocket(agentUrl(host, host.token));
     await waitForOpen(ws);
     // Initial ready message
-    const ready = await nextMessage(ws);
+    const ready = await nextMessage(ws, (message) => message.type === "host.ready");
     expect(ready.type).toBe("host.ready");
 
     const reply = nextMessage(ws);
@@ -124,7 +133,7 @@ describe("Host session run-control wire acknowledgements", () => {
     await nextMessage(ws); // host.ready
 
     // 1. Submit plan first
-    let reply = nextMessage(ws);
+    let reply = nextMessage(ws, (message) => message.type === "plan.submit.result" && message.requestId === "req-sub-2");
     ws.send(
       JSON.stringify({
         type: "plan.submit",
@@ -137,7 +146,7 @@ describe("Host session run-control wire acknowledgements", () => {
     const runId = subRes.runId as string;
 
     // 2. Pause run
-    reply = nextMessage(ws);
+    reply = nextMessage(ws, (message) => message.type === "run.pause.result" && message.requestId === "req-pause-1");
     ws.send(
       JSON.stringify({
         type: "run.pause",
@@ -154,7 +163,7 @@ describe("Host session run-control wire acknowledgements", () => {
     expect(pauseRes.at).toBeDefined();
 
     // 3. Resume run
-    reply = nextMessage(ws);
+    reply = nextMessage(ws, (message) => message.type === "run.resume.result" && message.requestId === "req-resume-1");
     ws.send(
       JSON.stringify({
         type: "run.resume",
@@ -171,7 +180,7 @@ describe("Host session run-control wire acknowledgements", () => {
     expect(resumeRes.at).toBeDefined();
 
     // 4. Cancel run
-    reply = nextMessage(ws);
+    reply = nextMessage(ws, (message) => message.type === "run.cancel.result" && message.requestId === "req-cancel-1");
     ws.send(
       JSON.stringify({
         type: "run.cancel",

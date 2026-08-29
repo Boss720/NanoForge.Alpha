@@ -304,7 +304,7 @@ export function Sidebar({
   };
 
   return (
-    <aside className={cn("flex h-full w-56 shrink-0 flex-col border-r border-border bg-card/50", className)}>
+    <aside className={cn("flex h-full w-full shrink-0 flex-col border-r border-border bg-card/50", className)}>
       {/* Workspaces Section */}
       <section className="max-h-52 shrink-0 overflow-y-auto px-2 pb-2 pt-3" aria-labelledby="workspaces-heading">
         <div className="flex items-center justify-between px-1 pb-1.5">

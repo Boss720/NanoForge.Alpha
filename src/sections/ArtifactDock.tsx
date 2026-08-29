@@ -9,6 +9,8 @@ import {
   Globe,
   Image as ImageIcon,
   Download,
+  Copy,
+  Check,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { ArtifactMetadata, ArtifactFeedbackResponse } from "@/types/artifacts";
@@ -37,6 +39,7 @@ export function ArtifactDock({
   className = "",
 }: ArtifactDockProps) {
   const [fullscreen, setFullscreen] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   const activeArtifact = useMemo(() => {
     if (activeArtifactId) {
@@ -44,10 +47,6 @@ export function ArtifactDock({
     }
     return artifacts[0] || null;
   }, [artifacts, activeArtifactId]);
-
-  if (!activeArtifact && artifacts.length === 0) {
-    return null;
-  }
 
   const getFormatIcon = (format: string) => {
     switch (format) {
@@ -75,6 +74,17 @@ export function ArtifactDock({
     URL.revokeObjectURL(url);
   };
 
+  const handleCopy = async () => {
+    if (!activeArtifact) return;
+    try {
+      await navigator.clipboard.writeText(activeArtifact.content);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1400);
+    } catch {
+      setCopied(false);
+    }
+  };
+
   return (
     <div
       data-testid="artifact-dock"
@@ -84,13 +94,23 @@ export function ArtifactDock({
     >
       {/* Dock Top Tabs */}
       <div className="flex h-10 shrink-0 items-center justify-between border-b border-border bg-secondary/60 px-2">
+        <div className="mr-2 flex shrink-0 items-center gap-2">
+          <span className="font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-foreground">Artifacts</span>
+          <span className="rounded-full bg-primary/15 px-1.5 py-0.5 font-mono text-[9px] text-primary" aria-label={`${artifacts.length} artifacts`}>
+            {artifacts.length}
+          </span>
+        </div>
         {/* Artifact Tabs */}
-        <div className="scrollbar-thin flex items-center gap-1 overflow-x-auto">
+        <div className="scrollbar-thin flex min-w-0 flex-1 items-center gap-1 overflow-x-auto" role="tablist" aria-label="Artifacts">
           {artifacts.map((art) => {
             const isActive = art.id === activeArtifact?.id;
             return (
               <button
                 key={art.id}
+                type="button"
+                role="tab"
+                aria-selected={isActive}
+                aria-label={`Open artifact ${art.name}`}
                 onClick={() => onSelectArtifact?.(art.id)}
                 className={`flex h-7 items-center gap-1.5 rounded-md px-2.5 font-mono text-[11.5px] transition-colors ${
                   isActive
@@ -116,7 +136,20 @@ export function ArtifactDock({
             variant="ghost"
             size="icon"
             className="h-6 w-6 text-muted-foreground hover:text-foreground"
+            title={copied ? "Copied" : "Copy artifact content"}
+            aria-label={copied ? "Artifact content copied" : "Copy artifact content"}
+            onClick={() => { void handleCopy(); }}
+            disabled={!activeArtifact}
+          >
+            {copied ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
+          </Button>
+
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-6 w-6 text-muted-foreground hover:text-foreground"
             title="Download Artifact"
+            aria-label="Download artifact"
             onClick={handleDownload}
           >
             <Download className="h-3.5 w-3.5" />
@@ -127,6 +160,7 @@ export function ArtifactDock({
             size="icon"
             className="h-6 w-6 text-muted-foreground hover:text-foreground"
             title={fullscreen ? "Exit Fullscreen" : "Fullscreen"}
+            aria-label={fullscreen ? "Exit fullscreen" : "Open fullscreen"}
             onClick={() => setFullscreen((f) => !f)}
           >
             {fullscreen ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
@@ -138,6 +172,7 @@ export function ArtifactDock({
               size="icon"
               className="h-6 w-6 text-muted-foreground hover:text-foreground"
               title="Close Dock"
+              aria-label="Close artifacts dock"
               onClick={onClose}
             >
               <X className="h-3.5 w-3.5" />
@@ -148,7 +183,7 @@ export function ArtifactDock({
 
       {/* Artifact Metadata Subheader */}
       {activeArtifact && (
-        <div className="flex shrink-0 items-center justify-between border-b border-border/60 bg-secondary/20 px-3 py-1.5 font-mono text-[11px] text-muted-foreground">
+        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border/60 bg-secondary/20 px-3 py-1.5 font-mono text-[11px] text-muted-foreground">
           <div className="flex items-center gap-2">
             <span className="font-medium text-foreground">{activeArtifact.name}</span>
             <span>•</span>
@@ -170,7 +205,7 @@ export function ArtifactDock({
           </div>
 
           {activeArtifact.summary && (
-            <span className="max-w-[280px] truncate text-foreground/80" title={activeArtifact.summary}>
+            <span className="max-w-[280px] truncate text-right text-foreground/80" title={activeArtifact.summary}>
               {activeArtifact.summary}
             </span>
           )}
@@ -182,8 +217,10 @@ export function ArtifactDock({
         {activeArtifact ? (
           <RenderArtifactBody artifact={activeArtifact} />
         ) : (
-          <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
-            Select an artifact to preview
+          <div className="flex h-full flex-col items-center justify-center gap-2 rounded-md border border-dashed border-border/70 bg-secondary/10 p-6 text-center text-xs text-muted-foreground">
+            <FileText className="h-6 w-6 text-muted-foreground/60" />
+            <p className="font-medium text-foreground">No artifact selected</p>
+            <p>Select an artifact tab to preview its contents.</p>
           </div>
         )}
       </div>

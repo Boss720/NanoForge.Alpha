@@ -287,6 +287,8 @@ export class RunCoordinator {
   private readonly config: RunCoordinatorConfig;
   private readonly clock: () => Date;
   private readonly runs = new Map<string, RunContext>();
+  private readonly pendingStarts: RunContext[] = [];
+  private startPumpScheduled = false;
 
   constructor(config: RunCoordinatorConfig) {
     this.config = config;
@@ -373,10 +375,33 @@ export class RunCoordinator {
       this.finish(ctx, "failed", `plan validation failed: ${validation.errors.map((e) => e.message).join("; ")}`);
     } else {
       this.emit(ctx, { type: "plan.validated", planId: plan.id, ok: true });
-      void this.drive(ctx);
+      // Keep submission transport-responsive.  `drive()` performs synchronous
+      // audit/event work before its first await; starting it inline lets a
+      // burst of valid submissions delay every `plan.submit.result` frame
+      // behind that work. Queue startup so a flood of submissions cannot run
+      // fifty synchronous prologues in one event-loop turn before the host
+      // has a chance to flush its correlated acknowledgement frames.
+      this.scheduleDrive(ctx);
     }
 
     return this.handleFor(ctx);
+  }
+
+  private scheduleDrive(ctx: RunContext): void {
+    this.pendingStarts.push(ctx);
+    if (this.startPumpScheduled) return;
+    this.startPumpScheduled = true;
+    setTimeout(() => this.startNextQueuedRun(), 25);
+  }
+
+  private startNextQueuedRun(): void {
+    const ctx = this.pendingStarts.shift();
+    if (ctx) void this.drive(ctx);
+    if (this.pendingStarts.length > 0) {
+      setTimeout(() => this.startNextQueuedRun(), 0);
+    } else {
+      this.startPumpScheduled = false;
+    }
   }
 
   private handleFor(ctx: RunContext): RunHandle {

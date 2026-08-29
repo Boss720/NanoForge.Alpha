@@ -13,7 +13,11 @@ import {
   ChevronDown,
   ChevronRight,
   FileIcon,
-  Code
+  Code,
+  Pause,
+  Square,
+  RotateCcw,
+  AlertTriangle,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
@@ -25,6 +29,10 @@ interface TaskTimelineProps {
   timeline: TaskTimelineType;
   onViewDiff?: (stepId: string) => void;
   onViewOutput?: (stepId: string) => void;
+  onPause?: () => void;
+  onResume?: () => void;
+  onCancel?: () => void;
+  onRetry?: () => void;
   className?: string;
   elapsed?: number; // pass elapsed time in seconds
 }
@@ -209,8 +217,25 @@ const StepItem = ({
   );
 };
 
-export function TaskTimeline({ timeline, onViewDiff, onViewOutput, className, elapsed = 0 }: TaskTimelineProps) {
+export function TaskTimeline({
+  timeline,
+  onViewDiff,
+  onViewOutput,
+  onPause,
+  onResume,
+  onCancel,
+  onRetry,
+  className,
+  elapsed = 0,
+}: TaskTimelineProps) {
   const completedSteps = timeline.steps.filter(s => s.status === 'success' || s.status === 'skipped').length;
+  const hasActiveRun = timeline.status === 'active';
+  const canCancel = timeline.status !== 'completed' && timeline.status !== 'failed';
+  const recoveryMessage = timeline.status === 'failed'
+    ? 'The run stopped with an error. Review the failed step, then retry when the local runtime is ready.'
+    : timeline.status === 'paused'
+      ? 'The run is paused. Resume when you are ready, or cancel to leave the workspace unchanged.'
+      : null;
   
   return (
     <div className={cn("flex flex-col border rounded-lg bg-card text-card-foreground shadow-sm overflow-hidden", className)}>
@@ -221,7 +246,8 @@ export function TaskTimeline({ timeline, onViewDiff, onViewOutput, className, el
             <span className="text-yellow-500 text-lg">⚡</span>
             <span>Task: "{timeline.goal}"</span>
           </div>
-          <Badge 
+          <Badge
+            data-testid="timeline-status"
             variant={
               timeline.status === 'active' ? 'default' :
               timeline.status === 'completed' ? 'secondary' :
@@ -250,6 +276,36 @@ export function TaskTimeline({ timeline, onViewDiff, onViewOutput, className, el
           <div>•</div>
           <div>{completedSteps} of {timeline.steps.length} steps completed</div>
         </div>
+        {recoveryMessage && (
+          <p className="flex items-start gap-1.5 rounded border border-amber-500/30 bg-amber-500/5 px-2.5 py-2 text-[11px] leading-relaxed text-amber-200" role="status">
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            {recoveryMessage}
+          </p>
+        )}
+        {(hasActiveRun || timeline.status === 'paused' || timeline.status === 'failed') && (
+          <div className="flex items-center gap-2 border-t border-border/60 pt-2" aria-label="Run controls">
+            {hasActiveRun && onPause && (
+              <button type="button" onClick={onPause} className="inline-flex items-center gap-1 rounded border border-border px-2 py-1 font-mono text-[10.5px] text-muted-foreground hover:bg-secondary hover:text-foreground" aria-label="Pause run">
+                <Pause className="h-3 w-3" /> Pause
+              </button>
+            )}
+            {timeline.status === 'paused' && onResume && (
+              <button type="button" onClick={onResume} className="inline-flex items-center gap-1 rounded border border-primary/40 bg-primary/10 px-2 py-1 font-mono text-[10.5px] text-primary hover:bg-primary/20" aria-label="Resume run">
+                <Play className="h-3 w-3" /> Resume
+              </button>
+            )}
+            {timeline.status === 'failed' && onRetry && (
+              <button type="button" onClick={onRetry} className="inline-flex items-center gap-1 rounded border border-primary/40 bg-primary/10 px-2 py-1 font-mono text-[10.5px] text-primary hover:bg-primary/20" aria-label="Retry run">
+                <RotateCcw className="h-3 w-3" /> Retry
+              </button>
+            )}
+            {canCancel && onCancel && (
+              <button type="button" onClick={onCancel} className="inline-flex items-center gap-1 rounded border border-destructive/50 px-2 py-1 font-mono text-[10.5px] text-red-300 hover:bg-destructive/15" aria-label="Cancel run">
+                <Square className="h-3 w-3" /> Cancel
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Timeline Steps */}

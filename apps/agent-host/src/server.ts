@@ -21,6 +21,7 @@
  * connection URL.
  */
 import { randomBytes, randomUUID } from "node:crypto";
+import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import Fastify, { type FastifyInstance } from "fastify";
@@ -260,8 +261,16 @@ export async function createHost(options: HostOptions = {}): Promise<HostHandle>
       scheduler: daemonManager.scheduler,
     });
 
+  const canonicalRoot = (value: string): string => {
+    const resolved = path.resolve(value);
+    try {
+      return (fs.realpathSync.native?.(resolved) ?? fs.realpathSync(resolved)).toLowerCase();
+    } catch {
+      return resolved.toLowerCase();
+    }
+  };
   const sameRoot = (candidate: string | undefined): boolean =>
-    candidate !== undefined && path.resolve(candidate).toLowerCase() === path.resolve(workspaceRoot).toLowerCase();
+    candidate !== undefined && canonicalRoot(candidate) === canonicalRoot(workspaceRoot);
   if (!sameRoot(ptyManager.workspaceRoot)) {
     throw new Error("PTY manager workspace root does not match the host workspace root");
   }

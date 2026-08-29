@@ -22,11 +22,27 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+function Get-DistributionVersion {
+    param([string]$SourceDir)
+
+    $ManifestPath = Join-Path $SourceDir "package.json"
+    if (Test-Path $ManifestPath) {
+        try {
+            $Manifest = Get-Content -Raw -Path $ManifestPath | ConvertFrom-Json
+            if ($Manifest.version) { return [string]$Manifest.version }
+        } catch {
+            Write-Warning "Could not read distribution version from $ManifestPath`: $_"
+        }
+    }
+    return "unknown"
+}
+
 function Write-Banner {
+    param([string]$Version)
     Write-Host ""
     Write-Host "==========================================================" -ForegroundColor Cyan
     Write-Host "         NanoForge - Autonomous Swarm Platform            " -ForegroundColor Yellow
-    Write-Host "               Windows Installer v0.6.0                   " -ForegroundColor Cyan
+    Write-Host ("               Windows Installer v{0}                   " -f $Version) -ForegroundColor Cyan
     Write-Host "==========================================================" -ForegroundColor Cyan
     Write-Host ""
 }
@@ -79,7 +95,7 @@ function Add-ToUserPath {
 function Register-Uninstaller {
     param(
         [string]$InstallLocation,
-        [string]$Version = "0.6.0"
+        [string]$Version
     )
 
     $RegKeyPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\NanoForge"
@@ -113,10 +129,6 @@ function Register-Uninstaller {
 
 # --- Main Installation Logic ---
 
-if (-not $Silent) {
-    Write-Banner
-}
-
 Write-Host "[1/5] Target installation directory: $InstallDir" -ForegroundColor Cyan
 if (-not (Test-Path $InstallDir)) {
     New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
@@ -126,6 +138,11 @@ $SourceDir = $PSScriptRoot
 # If run from bundle, source is current folder. If run from repo root, check bundle/release/dist
 if (Test-Path (Join-Path $SourceDir "bundle")) {
     $SourceDir = Join-Path $SourceDir "bundle"
+}
+$DistributionVersion = Get-DistributionVersion -SourceDir $SourceDir
+
+if (-not $Silent) {
+    Write-Banner -Version $DistributionVersion
 }
 
 Write-Host "[2/5] Copying platform distribution assets from $SourceDir..." -ForegroundColor Cyan
@@ -222,7 +239,7 @@ if (-not $NoPath) {
 }
 
 Write-Host "[5/5] Registering uninstaller..." -ForegroundColor Cyan
-Register-Uninstaller -InstallLocation $InstallDir
+Register-Uninstaller -InstallLocation $InstallDir -Version $DistributionVersion
 
 Write-Host ""
 Write-Host "==========================================================" -ForegroundColor Green

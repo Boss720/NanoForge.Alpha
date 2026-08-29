@@ -278,6 +278,25 @@ describe("RunCoordinator", () => {
     expect(audit.ended).toMatchObject([{ runId: handle.runId, state: "completed" }]);
   });
 
+  it("defers valid-plan execution until the submission handle is returned", async () => {
+    let streamStarted = false;
+    const adapter: ProviderAdapter = {
+      id: "prov-a",
+      capabilities: { planning: true, coding: true, vision: false, toolCalling: true },
+      streamChat: async function* () {
+        streamStarted = true;
+        yield { type: "done" };
+      },
+    };
+    const { coordinator } = setup([adapter]);
+
+    const handle = coordinator.submitRun(planWith([step("s1")]));
+
+    expect(streamStarted).toBe(false);
+    await expect(handle.done).resolves.toMatchObject({ status: "completed" });
+    expect(streamStarted).toBe(true);
+  });
+
   it("denied approval results in NO tool call and halts the run", async () => {
     const adapter = scriptedAdapter("prov-a", [NPM_INSTALL_PROPOSAL, { type: "done" }]);
     const { coordinator, events, runner, gate, audit } = setup([adapter], {

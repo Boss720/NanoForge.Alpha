@@ -357,7 +357,11 @@ export function canonicalizeSubagentPath(rawPath: string): string {
       break;
     }
   }
-  return path.normalize(decoded);
+  // Treat both separator styles as separators regardless of the host OS. A
+  // client can submit Windows-style traversal to a POSIX host (and vice
+  // versa), so leaving the foreign separator untouched would turn `..\\` into
+  // an ordinary filename rather than a traversal segment.
+  return path.normalize(decoded.replace(/[\\/]+/g, path.sep));
 }
 
 /**
@@ -377,6 +381,18 @@ export function authorizeSubagentPathAccess(
 ): SubagentAccessDecision {
   const root = path.resolve(options.workspaceRoot || ".");
   const normalizedCandidate = canonicalizeSubagentPath(request.candidatePath);
+
+  // `path.isAbsolute` only recognises the current platform's absolute-path
+  // syntax. Reject drive-qualified and UNC paths explicitly so a POSIX host
+  // cannot treat a Windows absolute path as a harmless relative filename.
+  const portableCandidate = normalizedCandidate.replace(/\\/g, "/");
+  if (/^[A-Za-z]:\//.test(portableCandidate) || portableCandidate.startsWith("//")) {
+    return {
+      allowed: false,
+      decision: "deny",
+      reason: `Path traversal violation: "${request.candidatePath}" uses a foreign absolute-path form.`,
+    };
+  }
 
   // Determine effective workspace root based on isolation mode
   const worktreeAbs = options.worktreePath ? path.resolve(root, options.worktreePath) : undefined;

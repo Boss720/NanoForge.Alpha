@@ -12,6 +12,7 @@ import {
   ROOT_DIR,
   RELEASE_DIR,
   BUNDLE_DIR,
+  PROJECT_VERSION,
 } from "../package-release.js";
 
 const require = createRequire(import.meta.url);
@@ -167,7 +168,7 @@ describe("NanoForge Packaging & Launcher System", () => {
   describe("4. Release Packaging Pipeline", () => {
     it("parses CLI arguments for package-release.js", () => {
       const defaultOpts = parseCliArgs([]);
-      expect(defaultOpts.version).toBe("0.6.0");
+      expect(defaultOpts.version).toBe(PROJECT_VERSION);
       expect(defaultOpts.skipBuild).toBe(false);
       expect(defaultOpts.dryRun).toBe(false);
 
@@ -189,10 +190,10 @@ describe("NanoForge Packaging & Launcher System", () => {
         expect(batContent).toContain("nanoforge-launcher.cjs");
 
         const readmePath = path.join(testTempDir, "README.txt");
-        generateReleaseReadme(readmePath, "0.6.0");
+        generateReleaseReadme(readmePath, PROJECT_VERSION);
         expect(fs.existsSync(readmePath)).toBe(true);
         const readmeContent = fs.readFileSync(readmePath, "utf8");
-        expect(readmeContent).toContain("NanoForge v0.6.0");
+        expect(readmeContent).toContain(`NanoForge v${PROJECT_VERSION}`);
         expect(readmeContent).toContain("http://127.0.0.1:4173/?hostPort=4174&token=...");
       } finally {
         fs.rmSync(testTempDir, { recursive: true, force: true });
@@ -201,8 +202,11 @@ describe("NanoForge Packaging & Launcher System", () => {
 
     it("assembles the complete release bundle structure", async () => {
       const result = await packageRelease({
-        version: "0.6.0",
-        skipBuild: true,
+        version: PROJECT_VERSION,
+        // A clean checkout has no bundled host yet. Exercise the complete
+        // packaging path instead of asserting that a skipped build produced
+        // server.mjs and agent-host.mjs.
+        skipBuild: false,
         dryRun: false,
       });
 
@@ -223,9 +227,12 @@ describe("NanoForge Packaging & Launcher System", () => {
       expect(fs.existsSync(path.join(BUNDLE_DIR, "install-nanoforge.ps1"))).toBe(true);
       expect(fs.existsSync(path.join(BUNDLE_DIR, "install-nanoforge.bat"))).toBe(true);
       expect(fs.existsSync(path.join(BUNDLE_DIR, "uninstall-nanoforge.ps1"))).toBe(true);
+      const installerContent = fs.readFileSync(path.join(BUNDLE_DIR, "install-nanoforge.ps1"), "utf8");
+      expect(installerContent).toContain("Get-DistributionVersion");
+      expect(installerContent).not.toContain("v0.6.0");
 
       // Verify zip archive exists
-      const zipPath = path.join(RELEASE_DIR, "NanoForge-v0.6.0-windows-x64.zip");
+      const zipPath = path.join(RELEASE_DIR, `NanoForge-v${PROJECT_VERSION}-windows-x64.zip`);
       expect(fs.existsSync(zipPath)).toBe(true);
       expect(fs.statSync(zipPath).size).toBeGreaterThan(1000);
     }, 60000);

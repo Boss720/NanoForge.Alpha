@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { render, screen } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { CapabilityApprovalDialog } from "@/components/ui/CapabilityApprovalDialog";
 
 const request = {
@@ -24,6 +24,8 @@ const request = {
 };
 
 describe("CapabilityApprovalDialog", () => {
+  afterEach(cleanup);
+
   it("does not render without a host-issued request", () => {
     const { container } = render(<CapabilityApprovalDialog request={null} onDecide={() => {}} />);
     expect(container).toBeEmptyDOMElement();
@@ -38,5 +40,23 @@ describe("CapabilityApprovalDialog", () => {
     expect(screen.getByText(/limited to this exact request and can be used once/i)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /approve once/i }));
     expect(onDecide).toHaveBeenCalledWith("req-1", true);
+  });
+
+  it("shows the host binding and expiry so the operator can review the exact grant", () => {
+    render(<CapabilityApprovalDialog request={request} onDecide={() => {}} />);
+
+    expect(screen.getByText("write")).toBeInTheDocument();
+    expect(screen.getByText("One use")).toBeInTheDocument();
+    expect(screen.getByText("workspace.writeFile")).toBeInTheDocument();
+    expect(screen.getByText("run-1")).toBeInTheDocument();
+    expect(screen.getByText(/Expires/)).toBeInTheDocument();
+  });
+
+  it("treats Escape as an explicit deny", async () => {
+    const onDecide = vi.fn();
+    render(<CapabilityApprovalDialog request={request} onDecide={onDecide} />);
+
+    await userEvent.setup().keyboard("{Escape}");
+    expect(onDecide).toHaveBeenCalledWith("req-1", false);
   });
 });
