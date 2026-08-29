@@ -121,25 +121,6 @@ pnpm desktop:build
 
 Passing local tests prove repository behavior and mocked/provider-adapter contracts only. A live NanoGPT check must be opt-in, keep credentials outside source control, and record no secret values.
 
-## Before presenting to NanoGPT
-
-- [ ] Say “independent local-first companion candidate,” not official integration or partnership.
-- [ ] Use a disposable sample workspace and confirm Demo mode is clearly labelled if no live key is available.
-- [ ] Confirm the browser API base URL, selected model, catalog freshness, and CORS path.
-- [ ] Keep the API key out of source control, screenshots, URLs, logs, and recordings.
-- [ ] If showing the local host, show its loopback address and one-use token flow; do not expose it to the network.
-- [ ] Do not present host-routed NanoGPT execution, hosted tenancy, a release archive, or live compatibility as already proven.
-- [ ] Have the verification output and [known limitations](docs/known-limitations.md) available.
-
-## 3–5 minute demo outline
-
-1. **0:00–0:30 — Positioning:** independent local-first companion candidate; state the browser-direct integration boundary.
-2. **0:30–1:00 — Readiness:** show Demo mode or a live NanoGPT connection, selected model, and disposable workspace.
-3. **1:00–2:15 — Core loop:** provide a bounded coding request, show context, streamed response, plan/tool visibility, and the generated diff.
-4. **2:15–3:15 — Review:** inspect the change, show verification evidence, and apply only within the disposable workspace if the host write path is intentionally enabled.
-5. **3:15–4:00 — Boundaries:** show local persistence, optional loopback host/SDK, and the explicit limitations.
-6. **4:00–5:00 — Ask:** propose a technical pilot, adapter contract tests, or a companion-app integration discussion.
-
 ## Collaboration request
 
 We would like NanoGPT’s guidance on a focused technical pilot: validate the `/models` and streaming chat contracts, capability/pricing/usage fields, authentication and CORS expectations, and error behavior. A useful first milestone could be one of:
