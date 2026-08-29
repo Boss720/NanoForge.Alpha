@@ -1,0 +1,40 @@
+{
+  "name": "@nanoforge/agent-host",
+  "version": "0.1.0",
+  "description": "Fastify loopback daemon with subagent supervision, MCP clients, terminal management, and a headless CLI runner",
+  "private": true,
+  "type": "module",
+  "main": "./src/server.ts",
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "start": "tsx src/server.ts",
+    "dev": "tsx watch src/server.ts"
+  },
+  "dependencies": {
+    "@fastify/websocket": "^11.3.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@nanoforge/protocol": "workspace:*",
+    "chokidar": "^5.0.0",
+    "execa": "^10.0.1",
+    "fastify": "^5.11.3",
+    "gray-matter": "^4.0.3",
+    "micromatch": "^4.0.8",
+    "pixelmatch": "^7.2.0",
+    "playwright-core": "^1.62.1",
+    "pngjs": "^7.0.0",
+    "ws": "^8.21.3",
+    "zod": "^4.3.5"
+  },
+  "devDependencies": {
+    "@types/micromatch": "^4.0.10",
+    "@types/node": "^24.10.1",
+    "@types/pixelmatch": "^5.2.6",
+    "@types/pngjs": "^6.0.5",
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.23.12",
+    "typescript": "~5.9.3",
+    "vitest": "^4.1.10"
+  }
+}

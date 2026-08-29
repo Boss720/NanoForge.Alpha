@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "rootDir": ".",
+    "outDir": "dist",
+    "tsBuildInfoFile": "dist/.tsbuildinfo",
+    "types": ["node"],
+    "baseUrl": ".",
+    "paths": {
+      "@protocol/*": ["../../packages/protocol/src/*"],
+      "@protocol": ["../../packages/protocol/src/index.ts"],
+      "@nanoforge/protocol/*": ["../../packages/protocol/src/*"],
+      "@nanoforge/protocol": ["../../packages/protocol/src/index.ts"],
+      "@nanoforge/core/*": ["../../packages/core/src/*"],
+      "@nanoforge/core": ["../../packages/core/src/index.ts"]
+    }
+  },
+  "references": [
+    { "path": "../../packages/protocol" }
+  ],
+  "include": ["src/**/*", "test/**/*"]
+}
