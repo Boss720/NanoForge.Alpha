@@ -34,7 +34,7 @@ export function ModelPanel({ models, selected, onSelect, live, routeDecision, cl
   }, [models, q, provider]);
 
   return (
-    <aside className={cn("flex w-72 shrink-0 flex-col border-l border-border bg-card/50", className)}>
+    <aside className={cn("flex h-full w-full min-w-0 shrink-0 flex-col border-l border-border bg-card/50", className)}>
       <div className="flex items-center justify-between px-3 pb-2 pt-3">
         <span className="micro-label">Model catalog</span>
         <span className={`font-mono text-[10px] ${live ? "text-emerald-400" : "text-muted-foreground"}`}>

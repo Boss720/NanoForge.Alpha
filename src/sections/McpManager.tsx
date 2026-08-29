@@ -38,11 +38,13 @@ export function McpManager({
           <h2 className="text-lg font-semibold flex items-center gap-2">
             <Server className="w-5 h-5" /> MCP Servers
           </h2>
-          <p className="text-sm text-muted-foreground">Manage and test Model Context Protocol servers</p>
+            <p className="text-sm text-muted-foreground">Preview: server registration and live tool execution are unavailable in this build.</p>
         </div>
         <Dialog open={isAddWizardOpen} onOpenChange={setIsAddWizardOpen}>
           <DialogTrigger asChild>
-            <Button size="sm" className="gap-2"><Boxes className="w-4 h-4" /> Add Server</Button>
+            <Button size="sm" className="gap-2" disabled title="Preview: MCP server registration is unavailable">
+              <Boxes className="w-4 h-4" /> Add Server (Preview)
+            </Button>
           </DialogTrigger>
           <DialogContent className="sm:max-w-[600px]">
             <DialogHeader>
@@ -80,7 +82,7 @@ export function McpManager({
             </Tabs>
             <div className="flex justify-end gap-2 mt-4">
               <Button variant="outline" onClick={() => setIsAddWizardOpen(false)}>Cancel</Button>
-              <Button onClick={() => setIsAddWizardOpen(false)}>Save Server</Button>
+              <Button disabled title="Preview: MCP server registration is unavailable">Save Server (Unavailable)</Button>
             </div>
           </DialogContent>
         </Dialog>
@@ -143,8 +145,8 @@ export function McpManager({
             <div className="mt-2 pt-3 border-t border-border flex justify-end gap-2">
                <Dialog>
                  <DialogTrigger asChild>
-                   <Button variant="ghost" size="sm" className="h-7 text-xs gap-1">
-                     <Play className="w-3 h-3" /> Live Tool Tester
+                   <Button variant="ghost" size="sm" className="h-7 text-xs gap-1" disabled title="Preview: live tool execution is unavailable">
+                     <Play className="w-3 h-3" /> Live Tool Tester (Unavailable)
                    </Button>
                  </DialogTrigger>
                  <DialogContent>
@@ -162,7 +164,7 @@ export function McpManager({
                          <Label>Arguments (JSON)</Label>
                          <textarea className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono" defaultValue="{}" />
                        </div>
-                       <Button className="w-full">Execute</Button>
+                       <Button className="w-full" disabled title="Preview: live tool execution is unavailable">Execute (Unavailable)</Button>
                        <div className="grid gap-2 mt-2">
                          <Label>Result / Logs</Label>
                          <div className="bg-muted p-3 rounded-md font-mono text-xs h-24 overflow-auto text-muted-foreground">

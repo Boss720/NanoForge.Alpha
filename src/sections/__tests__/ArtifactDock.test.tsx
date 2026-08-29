@@ -40,6 +40,26 @@ const sampleArtifacts: ArtifactMetadata[] = [
 ];
 
 describe("ArtifactDock", () => {
+  it("labels the dock and exposes tab and copy affordances", () => {
+    render(<ArtifactDock artifacts={sampleArtifacts} activeArtifactId="art-diff-1" />);
+
+    expect(screen.getByRole("tablist", { name: "Artifacts" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Open artifact auth-service.ts (Diff)" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(screen.getByRole("button", { name: "Copy artifact content" })).toBeInTheDocument();
+    expect(screen.getByText("3")).toHaveAttribute("aria-label", "3 artifacts");
+  });
+
+  it("renders a clear empty state when no artifacts are available", () => {
+    render(<ArtifactDock artifacts={[]} />);
+
+    expect(screen.getByText("No artifact selected")).toBeInTheDocument();
+    expect(screen.getByText("Select an artifact tab to preview its contents.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Copy artifact content" })).toBeDisabled();
+  });
+
   it("renders tabs and displays the active artifact", () => {
     render(<ArtifactDock artifacts={sampleArtifacts} activeArtifactId="art-diff-1" />);
 

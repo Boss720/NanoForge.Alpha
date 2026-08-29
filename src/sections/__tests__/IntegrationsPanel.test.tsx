@@ -7,6 +7,7 @@ import {
   IntegrationsPanel,
   type IntegrationsPanelProps,
   type McpServerRow,
+  type PluginRow,
   type RulesPackRow,
   type SkillRow,
 } from "../IntegrationsPanel";
@@ -65,6 +66,15 @@ const mcpServers: McpServerRow[] = [
     args: ["-y", "@modelcontextprotocol/server-github"],
     tools: ["mcp.github.create_issue", "mcp.github.search_issues"],
     secretRefs: ["env:GITHUB_TOKEN"],
+    enabled: true,
+    health: "ok",
+  },
+];
+
+const plugins: PluginRow[] = [
+  {
+    id: "sample-plugin",
+    name: "Sample plugin",
     enabled: true,
     health: "ok",
   },
@@ -195,5 +205,14 @@ describe("IntegrationsPanel", () => {
     renderPanel({ rulesPacks: [], skills: [], mcpServers: [] });
     await user.click(screen.getByRole("tab", { name: "Governance Rules" }));
     expect(screen.getByText("none configured")).toBeInTheDocument();
+  });
+
+  it("labels plugin lifecycle controls as unavailable preview actions", () => {
+    renderPanel({ plugins });
+
+    expect(screen.getByText(/plugin lifecycle actions are preview/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /create.*preview/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /install.*preview/i })).toBeDisabled();
+    expect(screen.getByRole("switch", { name: "enable Sample plugin" })).toBeDisabled();
   });
 });

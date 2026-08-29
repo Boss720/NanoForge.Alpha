@@ -42,12 +42,14 @@ export function PluginManager({
            <h2 className="text-lg font-semibold flex items-center gap-2">
              <Plug className="w-5 h-5" /> Plugin Manager
            </h2>
-           <p className="text-sm text-muted-foreground">Manage installed plugins and packages</p>
+           <p className="text-sm text-muted-foreground">Plugin lifecycle actions are Preview and unavailable in this build.</p>
          </div>
          <div className="flex gap-2">
            <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
              <DialogTrigger asChild>
-               <Button variant="outline" size="sm" className="gap-2"><Plus className="w-4 h-4" /> Create</Button>
+               <Button variant="outline" size="sm" className="gap-2" disabled title="Preview: plugin packaging is unavailable">
+                 <Plus className="w-4 h-4" /> Create (Preview)
+               </Button>
              </DialogTrigger>
              <DialogContent>
                 <DialogHeader>
@@ -84,7 +86,9 @@ export function PluginManager({
 
            <Dialog open={isInstallOpen} onOpenChange={setIsInstallOpen}>
              <DialogTrigger asChild>
-               <Button size="sm" className="gap-2"><Download className="w-4 h-4" /> Install</Button>
+               <Button size="sm" className="gap-2" disabled title="Preview: plugin installation is unavailable">
+                 <Download className="w-4 h-4" /> Install (Preview)
+               </Button>
              </DialogTrigger>
              <DialogContent>
                 <DialogHeader>
@@ -127,6 +131,8 @@ export function PluginManager({
               name={plugin.name}
               sub={plugin.id}
               enabled={plugin.enabled}
+              toggleDisabled
+              toggleTitle="Preview: plugin lifecycle changes are unavailable"
               onToggle={(v) => onTogglePlugin(plugin.id, v)}
               health={plugin.health}
               lastError={plugin.lastError}

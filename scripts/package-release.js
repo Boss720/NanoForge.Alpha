@@ -286,12 +286,15 @@ Options:
   // as sidecars so a packaged normal run has the same broker capabilities.
   for (const sidecar of ['workspace-picker.cjs', 'workspace-registry.cjs']) {
     fs.copyFileSync(path.join(ROOT_DIR, 'scripts', sidecar), path.join(BUNDLE_DIR, sidecar));
+    fs.copyFileSync(path.join(ROOT_DIR, 'scripts', sidecar), path.join(RELEASE_DIR, sidecar));
   }
 
   const hostBundleFile = path.join(HOST_DIST_DIR, 'server.mjs');
   if (fs.existsSync(hostBundleFile)) {
     fs.copyFileSync(hostBundleFile, path.join(BUNDLE_DIR, 'server.mjs'));
     fs.copyFileSync(hostBundleFile, path.join(BUNDLE_DIR, 'agent-host.mjs'));
+    fs.copyFileSync(hostBundleFile, path.join(RELEASE_DIR, 'server.mjs'));
+    fs.copyFileSync(hostBundleFile, path.join(RELEASE_DIR, 'agent-host.mjs'));
   }
 
   // Copy default-policy.json alongside server.mjs — policy.ts resolves it via
@@ -299,6 +302,7 @@ Options:
   const defaultPolicySrc = path.join(ROOT_DIR, 'apps', 'agent-host', 'src', 'policy', 'default-policy.json');
   if (fs.existsSync(defaultPolicySrc)) {
     fs.copyFileSync(defaultPolicySrc, path.join(BUNDLE_DIR, 'default-policy.json'));
+    fs.copyFileSync(defaultPolicySrc, path.join(RELEASE_DIR, 'default-policy.json'));
     console.log('[packager] Bundled default-policy.json');
   }
 

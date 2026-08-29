@@ -32,7 +32,11 @@ interface Props {
   onOpenSettings: () => void;
   /** Task 3.2: open the overlay drawers (rendered < lg only). */
   onOpenSidebar: () => void;
+  /** Toggle the persistent desktop navigation rail. */
+  onToggleSidebar?: () => void;
   onOpenModels: () => void;
+  /** Toggle the persistent desktop model catalog rail. */
+  onToggleModels?: () => void;
   /** Task 3.3: export the active session transcript as Markdown. */
   onExport: () => void;
   canExport: boolean;
@@ -43,6 +47,7 @@ interface Props {
   /** Phase 1: open artifact viewer dock */
   onOpenArtifacts?: () => void;
   artifactCount?: number;
+  artifactDockOpen?: boolean;
   /** Milestone 3: open subagent swarm dock */
   onOpenSubagents?: () => void;
   subagentCount?: number;
@@ -57,13 +62,16 @@ export function TopBar({
   usage,
   onOpenSettings,
   onOpenSidebar,
+  onToggleSidebar,
   onOpenModels,
+  onToggleModels,
   onExport,
   canExport,
   onOpenCosts,
   onOpenImages,
   onOpenArtifacts,
   artifactCount = 0,
+  artifactDockOpen = false,
   onOpenSubagents,
   subagentCount = 0,
   onOpenTheme,
@@ -84,6 +92,28 @@ export function TopBar({
       >
         <PanelLeft className="h-4 w-4" />
       </button>
+
+      {onToggleSidebar && (
+        <button
+          onClick={onToggleSidebar}
+          className="hidden rounded-md border border-border bg-secondary/60 p-1.5 text-muted-foreground transition-colors hover:border-primary/50 hover:text-primary lg:block"
+          aria-label="Toggle navigation sidebar"
+          title="Toggle navigation sidebar"
+        >
+          <PanelLeft className="h-4 w-4" />
+        </button>
+      )}
+
+      {onToggleModels && (
+        <button
+          onClick={onToggleModels}
+          className="hidden rounded-md border border-border bg-secondary/60 p-1.5 text-muted-foreground transition-colors hover:border-primary/50 hover:text-primary lg:block"
+          aria-label="Toggle model catalog sidebar"
+          title="Toggle model catalog sidebar"
+        >
+          <PanelRight className="h-4 w-4" />
+        </button>
+      )}
 
       {/* mark */}
       <div className="flex items-center gap-2.5">
@@ -147,9 +177,10 @@ export function TopBar({
       {onOpenArtifacts && (
         <button
           onClick={onOpenArtifacts}
-          title="Artifacts Dock — diffs, diagrams, and live previews"
-          className="relative rounded-md border border-border bg-secondary/60 p-1.5 text-muted-foreground transition-colors hover:border-primary/50 hover:text-primary"
-          aria-label="Open artifacts dock"
+          title={`${artifactDockOpen ? "Close" : "Open"} artifacts dock — diffs, diagrams, and live previews`}
+          className={`relative rounded-md border border-border p-1.5 transition-colors hover:border-primary/50 hover:text-primary ${artifactDockOpen ? "border-primary/50 bg-primary/10 text-primary" : "bg-secondary/60 text-muted-foreground"}`}
+          aria-label={`${artifactDockOpen ? "Close" : "Open"} artifacts dock`}
+          aria-pressed={artifactDockOpen}
         >
           <Layers className="h-4 w-4" />
           {artifactCount > 0 && (

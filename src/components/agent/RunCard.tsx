@@ -35,6 +35,9 @@ export interface RunCardProps {
   onResume?: () => void;
   onCancel?: () => void;
   onApprove?: () => void;
+  /** Shown for failed/blocked runs; copy must describe a real recovery path. */
+  recoveryHint?: string;
+  onRetry?: () => void;
 }
 
 const STATUS_CONFIG: Record<RunStatus, { icon: ReactNode; label: string; className: string; shape: string }> = {
@@ -105,6 +108,8 @@ export function RunCard({
   onResume,
   onCancel,
   onApprove,
+  recoveryHint,
+  onRetry,
 }: RunCardProps) {
   const [filesExpanded, setFilesExpanded] = useState(false);
   const config = STATUS_CONFIG[status];
@@ -120,6 +125,7 @@ export function RunCard({
         <span
           className={cn("inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold", config.className)}
           aria-label={`Status: ${config.label}`}
+          aria-live="polite"
         >
           {config.icon}
           <span aria-hidden="true">{config.shape}</span>
@@ -144,8 +150,14 @@ export function RunCard({
       )}
 
       {/* Current step */}
-      {currentStep && status === "running" && (
+      {currentStep && (status === "running" || status === "paused" || status === "awaiting_approval") && (
         <p className="mt-1 text-[10px] text-muted-foreground italic">{currentStep}</p>
+      )}
+
+      {(status === "failed" || status === "blocked") && recoveryHint && (
+        <p className="mt-2 rounded border border-amber-500/25 bg-amber-500/5 px-2 py-1.5 text-[10px] leading-relaxed text-amber-200" role="status">
+          {recoveryHint}
+        </p>
       )}
 
       {/* Touched files */}
@@ -201,6 +213,16 @@ export function RunCard({
             aria-label="Approve run"
           >
             <CheckCircle2 className="h-3 w-3" /> Approve
+          </button>
+        )}
+        {status === "failed" && onRetry && (
+          <button
+            type="button"
+            onClick={onRetry}
+            className="inline-flex items-center gap-1 rounded border border-primary/30 bg-primary/10 px-2 py-1 text-[10px] text-primary hover:bg-primary/20 transition-colors"
+            aria-label="Retry run"
+          >
+            <Play className="h-3 w-3" /> Retry
           </button>
         )}
         {status !== "completed" && status !== "cancelled" && onCancel && (

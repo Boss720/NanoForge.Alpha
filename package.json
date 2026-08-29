@@ -1,7 +1,7 @@
 {
   "name": "nanoforge",
   "private": true,
-  "version": "0.1.0",
+  "version": "1.0.4",
   "type": "module",
   "packageManager": "pnpm@9.15.4",
   "workspaces": [

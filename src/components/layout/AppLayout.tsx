@@ -1,5 +1,5 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
-import { Check, Loader2, X } from "lucide-react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { Check, ChevronLeft, Loader2, PanelRight, X } from "lucide-react";
 import type {
   ConnectionState,
   ChatSendInput,
@@ -11,6 +11,7 @@ import type {
   VirtualFile,
   Workspace,
   WorkspaceLocation,
+  ExecutionPlan,
 } from "@/types";
 import type { FileTreeNode } from "@/types/workspace";
 import { TopBar, type RuntimeStatus } from "@/sections/TopBar";
@@ -21,9 +22,12 @@ import { ChatPanel } from "@/sections/ChatPanel";
 import { ModelPanel } from "@/sections/ModelPanel";
 import { ConnectDialog } from "@/sections/ConnectDialog";
 import { PlanPanel } from "@/sections/PlanPanel";
+import { TaskTimeline } from "@/sections/TaskTimeline";
+import type { TaskTimeline as TaskTimelineModel, TaskStepKind } from "@/types/timeline";
 import { BrowserPermissionDialog } from "@/sections/BrowserPermissionDialog";
 import { VisualEvidenceCard } from "@/sections/VisualEvidenceCard";
 import { ArtifactDock } from "@/sections/ArtifactDock";
+import { AppContextMenu } from "@/components/layout/AppContextMenu";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { HighlightedCode } from "@/components/RichText";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
@@ -80,10 +84,91 @@ export function DockSkeleton({ label = "Loading panel..." }: { label?: string })
 
 const MAX_SWITCHER_ITEMS = 50;
 
+type RailKey = "sidebar" | "artifact" | "subagents" | "plan" | "model";
+
+const DEFAULT_RAIL_WIDTHS: Record<RailKey, number> = {
+  sidebar: 224,
+  artifact: 440,
+  subagents: 480,
+  plan: 320,
+  model: 288,
+};
+
+const RAIL_LIMITS: Record<RailKey, { min: number; max: number }> = {
+  sidebar: { min: 200, max: 420 },
+  artifact: { min: 340, max: 850 },
+  subagents: { min: 360, max: 760 },
+  plan: { min: 280, max: 620 },
+  model: { min: 240, max: 560 },
+};
+
+function readStoredRailWidths(): Record<RailKey, number> {
+  if (typeof window === "undefined") return DEFAULT_RAIL_WIDTHS;
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem("nanoforge.rail-widths") ?? "{}");
+    return (Object.keys(DEFAULT_RAIL_WIDTHS) as RailKey[]).reduce((result, key) => {
+      const value = Number(parsed?.[key]);
+      result[key] = Number.isFinite(value)
+        ? Math.min(RAIL_LIMITS[key].max, Math.max(RAIL_LIMITS[key].min, value))
+        : DEFAULT_RAIL_WIDTHS[key];
+      return result;
+    }, {} as Record<RailKey, number>);
+  } catch {
+    return DEFAULT_RAIL_WIDTHS;
+  }
+}
+
+function readStoredCollapsed(key: string): boolean {
+  if (typeof window === "undefined") return false;
+  return window.localStorage.getItem(key) === "true";
+}
+
+function ResizeHandle({ side, label, onResize }: { side: "left" | "right"; label: string; onResize: (event: ReactPointerEvent<HTMLButtonElement>) => void }) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title="Drag to resize"
+      onPointerDown={onResize}
+      className={`group absolute inset-y-0 z-20 hidden w-2 cursor-col-resize items-center justify-center lg:flex ${side === "left" ? "-left-1" : "-right-1"}`}
+    >
+      <span className="h-10 w-1 rounded-full bg-border/70 opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100" />
+    </button>
+  );
+}
+
 function flattenWorkspaceFiles(nodes: FileTreeNode[]): VirtualFile[] {
   return nodes.flatMap((node) => node.isDir
     ? flattenWorkspaceFiles(node.children ?? [])
     : [{ path: node.path, language: "text", content: "" }]);
+}
+
+function timelineStepKind(title: string): TaskStepKind {
+  const normalized = title.toLowerCase();
+  if (/test|verify|check/.test(normalized)) return "run_tests";
+  if (/edit|write|implement|change|patch/.test(normalized)) return "edit_files";
+  if (/read|inspect|open/.test(normalized)) return "read_files";
+  if (/search|find/.test(normalized)) return "search";
+  if (/run|execute|command|build/.test(normalized)) return "run_command";
+  if (/plan/.test(normalized)) return "plan";
+  return "analyze";
+}
+
+function timelineFromPlan(plan: ExecutionPlan): TaskTimelineModel {
+  return {
+    id: plan.id,
+    goal: plan.goal,
+    status: plan.state === "executing" ? "active" : plan.state === "completed" ? "completed" : "paused",
+    steps: plan.steps.map((step) => ({
+      id: step.id,
+      kind: timelineStepKind(step.title),
+      title: step.title,
+      description: step.description,
+      status: step.status === "succeeded" ? "success" : step.status === "failed" ? "failed" : step.status === "blocked" ? "blocked" : step.status === "running" ? "running" : "pending",
+      files: step.affectedScopes,
+    })),
+    startedAt: plan.createdAt ?? Date.now(),
+  };
 }
 
 const SWARM_ALIAS_ACTIONS: Record<string, string> = {
@@ -270,9 +355,51 @@ export function AppLayout({
 
   const isNarrow = useMediaQuery("(max-width: 1023px)");
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => readStoredCollapsed("nanoforge.sidebar-collapsed"));
+  const [modelCollapsed, setModelCollapsed] = useState(() => readStoredCollapsed("nanoforge.model-collapsed"));
+  const [railWidths, setRailWidths] = useState<Record<RailKey, number>>(readStoredRailWidths);
   const [modelsOpen, setModelsOpen] = useState(false);
   const [switcherOpen, setSwitcherOpen] = useState(false);
   const [switcherQuery, setSwitcherQuery] = useState("");
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("nanoforge.sidebar-collapsed", String(sidebarCollapsed));
+      window.localStorage.setItem("nanoforge.model-collapsed", String(modelCollapsed));
+      window.localStorage.setItem("nanoforge.rail-widths", JSON.stringify(railWidths));
+    } catch {
+      // Layout preferences are best-effort and must never block the workspace.
+    }
+  }, [modelCollapsed, railWidths, sidebarCollapsed]);
+
+  const resizeRail = useCallback((key: RailKey, event: ReactPointerEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = railWidths[key];
+    const direction = key === "sidebar" ? 1 : -1;
+    const { min, max } = RAIL_LIMITS[key];
+    const update = (move: PointerEvent) => {
+      const delta = (move.clientX - startX) * direction;
+      const nextWidth = Math.min(max, Math.max(min, startWidth + delta));
+      setRailWidths((current) => current[key] === nextWidth ? current : { ...current, [key]: nextWidth });
+    };
+    const stop = () => {
+      window.removeEventListener("pointermove", update);
+      window.removeEventListener("pointerup", stop);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    window.addEventListener("pointermove", update);
+    window.addEventListener("pointerup", stop, { once: true });
+  }, [railWidths]);
+
+  const resetPanelLayout = useCallback(() => {
+    setRailWidths({ ...DEFAULT_RAIL_WIDTHS });
+    setSidebarCollapsed(false);
+    setModelCollapsed(false);
+  }, []);
 
   const activeWorkspace = workspaces.find((workspace) => workspace.id === activeWorkspaceId);
   const persistedHostWorkspace = activeWorkspace?.location?.status === "ready";
@@ -553,20 +680,35 @@ export function AppLayout({
   );
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-background">
+    <AppContextMenu
+      sidebarCollapsed={sidebarCollapsed}
+      modelCollapsed={modelCollapsed}
+      artifactDockOpen={artifactsManager.isOpen}
+      activeFile={viewerFile}
+      onNewChat={() => onCreateChat(selectedModel)}
+      onOpenFolder={() => { void openFolder(); }}
+      onToggleSidebar={() => setSidebarCollapsed((collapsed) => !collapsed)}
+      onToggleModelCatalog={() => setModelCollapsed((collapsed) => !collapsed)}
+      onToggleArtifacts={artifactsManager.toggleDock}
+      onResetPanelLayout={resetPanelLayout}
+    >
+      <div className="flex h-screen flex-col overflow-hidden bg-background">
       <ErrorBoundary panelName="Top Bar">
         <TopBar
           connection={connection}
           usage={usage}
           onOpenSettings={() => setSettingsOpen(true)}
           onOpenSidebar={() => setSidebarOpen(true)}
+          onToggleSidebar={() => setSidebarCollapsed((collapsed) => !collapsed)}
           onOpenModels={() => setModelsOpen(true)}
+          onToggleModels={() => setModelCollapsed((collapsed) => !collapsed)}
           onExport={handleExport}
           canExport={!!session && session.messages.length > 0}
           onOpenCosts={() => setCostsOpen(true)}
           onOpenImages={() => setImagesOpen(true)}
           onOpenArtifacts={artifactsManager.toggleDock}
           artifactCount={artifactsManager.artifacts.length}
+          artifactDockOpen={artifactsManager.isOpen}
           onOpenSubagents={() => setSubagentsOpen((o) => !o)}
           subagentCount={
             host.subagents.filter((a) => a.state === "running").length || host.subagents.length
@@ -578,37 +720,62 @@ export function AppLayout({
 
       <div className="flex min-h-0 flex-1">
         {/* Sidebar dock for desktop (lg and up) */}
-        <ErrorBoundary panelName="Sidebar Navigation" className="hidden lg:flex">
-          <Sidebar
-            className="hidden lg:flex"
-            workspaces={workspaces}
-            activeWorkspaceId={activeWorkspaceId}
-            activeChatId={activeChatId}
-            onSelectWorkspace={onSelectWorkspace}
-            onCreateWorkspace={onCreateWorkspace}
-            onOpenFolder={() => { void openFolder(); }}
-            onReconnectWorkspace={reconnectWorkspace}
-            onOpenRecentWorkspace={openRecentWorkspace}
-            recents={workspaceBroker.recents}
-            workspaceRecovery={effectiveRecovery}
-            onRenameWorkspace={onRenameWorkspace}
-            onPinWorkspace={onPinWorkspace}
-            onArchiveWorkspace={onArchiveWorkspace}
-            onDuplicateWorkspace={onDuplicateWorkspace}
-            onDeleteWorkspace={onDeleteWorkspace}
-            onSelectChat={onSelectChat}
-            onCreateChat={() => onCreateChat(selectedModel)}
-            onRenameChat={onRenameChat}
-            onPinChat={onPinChat}
-            onArchiveChat={onArchiveChat}
-            onDuplicateChat={onDuplicateChat}
-            onDeleteChat={onDeleteChat}
-            files={files}
-            activeFile={viewerFile ?? ""}
-            onFileSelect={(p) => setViewerFile(p)}
-            workspaceExplorer={explorerNode}
-          />
-        </ErrorBoundary>
+        {!sidebarCollapsed ? (
+          <div
+            data-testid="sidebar-rail"
+            className="relative hidden h-full shrink-0 lg:block"
+            style={{ width: railWidths.sidebar }}
+          >
+            <ResizeHandle
+              side="right"
+              label="Resize navigation sidebar"
+              onResize={(event) => resizeRail("sidebar", event)}
+            />
+            <ErrorBoundary panelName="Sidebar Navigation" className="hidden h-full lg:flex">
+              <Sidebar
+                className="hidden h-full w-full lg:flex"
+                workspaces={workspaces}
+                activeWorkspaceId={activeWorkspaceId}
+                activeChatId={activeChatId}
+                onSelectWorkspace={onSelectWorkspace}
+                onCreateWorkspace={onCreateWorkspace}
+                onOpenFolder={() => { void openFolder(); }}
+                onReconnectWorkspace={reconnectWorkspace}
+                onOpenRecentWorkspace={openRecentWorkspace}
+                recents={workspaceBroker.recents}
+                workspaceRecovery={effectiveRecovery}
+                onRenameWorkspace={onRenameWorkspace}
+                onPinWorkspace={onPinWorkspace}
+                onArchiveWorkspace={onArchiveWorkspace}
+                onDuplicateWorkspace={onDuplicateWorkspace}
+                onDeleteWorkspace={onDeleteWorkspace}
+                onSelectChat={onSelectChat}
+                onCreateChat={() => onCreateChat(selectedModel)}
+                onRenameChat={onRenameChat}
+                onPinChat={onPinChat}
+                onArchiveChat={onArchiveChat}
+                onDuplicateChat={onDuplicateChat}
+                onDeleteChat={onDeleteChat}
+                files={files}
+                activeFile={viewerFile ?? ""}
+                onFileSelect={(p) => setViewerFile(p)}
+                workspaceExplorer={explorerNode}
+              />
+            </ErrorBoundary>
+          </div>
+        ) : (
+          <div className="relative hidden w-10 shrink-0 border-r border-border bg-card/30 lg:flex lg:items-start lg:justify-center lg:pt-3">
+            <button
+              type="button"
+              onClick={() => setSidebarCollapsed(false)}
+              className="rounded-md border border-border bg-secondary/60 p-1.5 text-muted-foreground hover:border-primary/50 hover:text-primary"
+              aria-label="Show navigation sidebar"
+              title="Show navigation sidebar"
+            >
+              <ChevronLeft className="h-4 w-4 rotate-180" />
+            </button>
+          </div>
+        )}
 
         {/* Central Chat Panel */}
         <ErrorBoundary panelName="Chat Transcript" className="flex-1">
@@ -634,11 +801,17 @@ export function AppLayout({
         </ErrorBoundary>
 
         {/* Artifact Viewer Dock */}
-        {artifactsManager.isOpen && artifactsManager.artifacts.length > 0 && (
+        {artifactsManager.isOpen && (
           <aside
             data-testid="artifact-rail"
-            className="hidden min-h-0 w-[440px] shrink-0 flex-col lg:flex"
+            className="relative hidden min-h-0 shrink-0 flex-col lg:flex"
+            style={{ width: railWidths.artifact }}
           >
+            <ResizeHandle
+              side="left"
+              label="Resize artifacts dock"
+              onResize={(event) => resizeRail("artifact", event)}
+            />
             <ErrorBoundary panelName="Artifact Viewer">
               <ArtifactDock
                 artifacts={artifactsManager.artifacts}
@@ -655,8 +828,14 @@ export function AppLayout({
         {subagentsOpen && (
           <aside
             data-testid="subagents-rail"
-            className="hidden min-h-0 w-[480px] shrink-0 flex-col lg:flex"
+            className="relative hidden min-h-0 shrink-0 flex-col lg:flex"
+            style={{ width: railWidths.subagents }}
           >
+            <ResizeHandle
+              side="left"
+              label="Resize subagents panel"
+              onResize={(event) => resizeRail("subagents", event)}
+            />
             <ErrorBoundary panelName="Subagent Swarm Control Plane">
               <Suspense fallback={<DockSkeleton label="Loading Subagents Swarm Control Plane..." />}>
                 <SubagentsPanel
@@ -671,16 +850,33 @@ export function AppLayout({
 
         {/* Plan Inspector Side Rail (mounted when plan or evidence exists) */}
         {(host.plan || host.evidence) && (
-          <aside data-testid="plan-rail" className="hidden min-h-0 w-80 shrink-0 flex-col lg:flex">
+          <aside data-testid="plan-rail" className="relative hidden min-h-0 shrink-0 flex-col lg:flex" style={{ width: railWidths.plan }}>
+            <ResizeHandle
+              side="left"
+              label="Resize plan panel"
+              onResize={(event) => resizeRail("plan", event)}
+            />
             {host.plan && (
               <ErrorBoundary panelName="Plan Inspector">
                 <PlanPanel
                   plan={host.plan}
-                  className="min-h-0 flex-1"
+                  className={host.plan.state === "executing" || host.plan.state === "paused" ? "min-h-0 max-h-[55%]" : "min-h-0 flex-1"}
                   onApproveStep={host.approveStep}
                   onRunApproved={host.runApproved}
                   onPause={host.pause}
                   onCancel={host.cancel}
+                />
+              </ErrorBoundary>
+            )}
+            {host.plan && (host.plan.state === "executing" || host.plan.state === "paused" || host.plan.state === "completed") && (
+              <ErrorBoundary panelName="Run Timeline">
+                <TaskTimeline
+                  timeline={timelineFromPlan(host.plan)}
+                  className="min-h-[280px] min-h-0 flex-1 rounded-none border-x-0 border-b-0 shadow-none"
+                  onPause={host.plan.state === "executing" ? () => host.pause(host.plan!.id) : undefined}
+                  onResume={host.plan.state === "paused" ? () => host.runApproved(host.plan!.id) : undefined}
+                  onCancel={host.plan.state !== "completed" ? () => host.cancel(host.plan!.id) : undefined}
+                  onRetry={host.plan.state === "completed" ? undefined : () => host.runApproved(host.plan!.id)}
                 />
               </ErrorBoundary>
             )}
@@ -698,16 +894,41 @@ export function AppLayout({
         )}
 
         {/* Model Selection Panel */}
-        <ErrorBoundary panelName="Model Selection" className="hidden lg:flex">
-          <ModelPanel
-            className="hidden lg:flex"
-            models={models}
-            selected={selectedModel}
-            onSelect={setSelectedModel}
-            live={connection.liveModels}
-            routeDecision={host.routeDecision ?? undefined}
-          />
-        </ErrorBoundary>
+        {!modelCollapsed ? (
+          <div
+            data-testid="model-rail"
+            className="relative hidden h-full min-h-0 shrink-0 lg:block"
+            style={{ width: railWidths.model }}
+          >
+            <ResizeHandle
+              side="left"
+              label="Resize model catalog sidebar"
+              onResize={(event) => resizeRail("model", event)}
+            />
+            <ErrorBoundary panelName="Model Selection" className="hidden h-full lg:flex">
+              <ModelPanel
+                className="hidden h-full w-full lg:flex"
+                models={models}
+                selected={selectedModel}
+                onSelect={setSelectedModel}
+                live={connection.liveModels}
+                routeDecision={host.routeDecision ?? undefined}
+              />
+            </ErrorBoundary>
+          </div>
+        ) : (
+          <div className="relative hidden w-10 shrink-0 border-l border-border bg-card/30 lg:flex lg:items-start lg:justify-center lg:pt-3">
+            <button
+              type="button"
+              onClick={() => setModelCollapsed(false)}
+              className="rounded-md border border-border bg-secondary/60 p-1.5 text-muted-foreground hover:border-primary/50 hover:text-primary"
+              aria-label="Show model catalog sidebar"
+              title="Show model catalog sidebar"
+            >
+              <PanelRight className="h-4 w-4" />
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Mobile Drawers (Sheet) */}
@@ -992,6 +1213,7 @@ export function AppLayout({
           </div>
         </div>
       )}
-    </div>
+      </div>
+    </AppContextMenu>
   );
 }
