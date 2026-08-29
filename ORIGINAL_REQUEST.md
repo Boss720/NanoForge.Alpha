@@ -46,3 +46,43 @@ Deliver comprehensive unit, component, and adversarial test suites across `packa
 - [ ] `npm run test:host` passes with 100% success.
 - [ ] `npm test` passes with 100% success across all frontend component suites.
 - [ ] `npm run build` completes with 0 errors.
+
+## 2026-08-28T17:18:32Z
+
+Conduct an exhaustive architectural, security, and functional assessment of the NanoForge codebase, documenting its pros, cons, shortfalls, and a detailed comparison against Claude Code's desktop and CLI agent architecture in a dedicated report at `docs/ASSESSMENT_REPORT.md`.
+
+Working directory: c:/Users/Hp/Documents/kimi/Workspaces/kpkoj/nano-forge
+Integrity mode: development
+
+## Requirements
+
+### R1. Complete Repository & Architecture Assessment
+Audit all workspace components (`apps/agent-host`, `packages/protocol`, `packages/core`, `packages/sdk`, `src/`, and test infrastructure). Analyze system architecture, provider adapters, agent runtime loop, local host WebSocket control plane, state persistence, and test coverage.
+
+### R2. Detailed Analysis of Pros, Cons, and Shortfalls
+Produce structured sections detailing:
+- **Pros**: Modularity, protocol type-safety, local-first ergonomics, reviewable diffs, isolation patterns.
+- **Cons & Technical Debt**: Architecture bottlenecks, provider coupling/gaps, failure modes, error recovery.
+- **Shortfalls & Missing Capabilities**: Features present in state-of-the-art coding agent environments that are absent or stubbed in NanoForge (e.g. subagent coordination, autonomous tool execution depth, MCP support, multi-turn reasoning workflows, token optimization).
+
+### R3. Deep Comparative Evaluation with Claude Code
+Provide a head-to-head architectural and developer-experience comparison between NanoForge and Claude Code Desktop / CLI, covering:
+- Execution environment & agent control plane (Browser + Fastify Loopback vs. Node/CLI Native Runtime).
+- Tooling, file system access, terminal execution, and permission model / write boundaries.
+- Context management, subagents, and model provider routing.
+- Developer experience (UI workbench vs. CLI/terminal-first workflows).
+
+### R4. Actionable Roadmap & Recommendations
+Provide concrete engineering recommendations for addressing shortfalls and evolving NanoForge into a production-grade coding assistant workbench.
+
+## Acceptance Criteria
+
+### Deliverable & Structure
+- [ ] The assessment report is written to `docs/ASSESSMENT_REPORT.md` with clear sectioning matching R1-R4.
+- [ ] All claims, strengths, and shortfalls cite specific source files and line ranges in the repository.
+
+### Technical Depth & Rigor
+- [ ] Security boundaries (single-use WebSocket tokens, workspace containment checks, API key lifecycle in browser memory) are rigorously evaluated against realistic threat models.
+- [ ] Comparative analysis provides concrete technical contrasts with Claude Code rather than high-level generalities.
+- [ ] Existing automated test suites (`pnpm test:all`) and type-check status are verified and referenced as empirical baseline.
+

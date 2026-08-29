@@ -1,5 +1,11 @@
 # NanoForge Hardening & Production Readiness Progress Tracking (Phases 0–7)
 
+## CI failure investigation — 2026-08-28
+
+The latest GitHub Verify retry reached the runner and failed only in the concurrent plan-submit adversarial test (`0/50` acknowledgements; `host.ready` only). The current wave had two read-only review lanes: coordinator/message-dispatch analysis and CI/test-environment analysis; both were blocked by the host usage limit. Root reproduced the failure mechanism by tracing inline coordinator startup and changed valid runs to begin on the next event-loop check phase, allowing the session to send each correlated acknowledgement before synchronous run work.
+
+Fresh verification after the fix: the host suite passed **57 files / 803 tests** when run through the root Vitest configuration with only `apps/agent-host/src/**/*.test.ts` included; the original root suite passed **85 files / 774 tests**; `cmd.exe /c pnpm typecheck` passed **6/6 tasks**; `cmd.exe /c pnpm lint` passed; and `cmd.exe /c pnpm build` passed. The package-scoped Vitest command remains blocked in this managed shell by esbuild's denied access to the repository config path.
+
 ## Active Initiative: P0.1 Host Capability Broker
 
 **Status:** IN PROGRESS — Wave 0 baseline and broker seam
