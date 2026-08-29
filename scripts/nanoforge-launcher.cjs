@@ -26,10 +26,13 @@ function isSeaRuntime() {
 function resolveLauncherSidecar(name, options = {}) {
   const isSea = options.isSea ?? isSeaRuntime();
   const executablePath = options.execPath || process.execPath;
+  const pathApi = /^[A-Za-z]:[\\/]/.test(executablePath) || executablePath.includes('\\')
+    ? path.win32
+    : path;
   // SEA embeds this launcher, but the native picker and registry deliberately
   // remain bundle sidecars. Resolve them from the executable at runtime rather
   // than from SEA's virtual source directory.
-  return path.join(isSea ? path.dirname(executablePath) : __dirname, name);
+  return pathApi.join(isSea ? pathApi.dirname(executablePath) : __dirname, name);
 }
 
 // `require` in a SEA entry script only resolves built-in modules. Recreate a
@@ -250,7 +253,9 @@ function defaultWorkspaceCapabilities(allowWorkspaceWrites) {
 }
 
 function workspaceLabel(entry) {
-  const label = path.basename(entry.path || '').trim();
+  const workspacePath = entry.path || '';
+  const pathApi = workspacePath.includes('\\') ? path.win32 : path;
+  const label = pathApi.basename(workspacePath).trim();
   return label || 'Workspace';
 }
 
