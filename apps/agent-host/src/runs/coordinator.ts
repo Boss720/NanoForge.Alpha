@@ -376,11 +376,12 @@ export class RunCoordinator {
       // Keep submission transport-responsive.  `drive()` performs synchronous
       // audit/event work before its first await; starting it inline lets a
       // burst of valid submissions delay every `plan.submit.result` frame
-      // behind that work.  Schedule execution for the next check phase so the
-      // caller can publish the run handle and its acknowledgement first.
-      setImmediate(() => {
+      // behind that work. Defer execution to the next timer turn so a socket
+      // handler can publish and flush its acknowledgement before any queued
+      // run performs synchronous startup work.
+      setTimeout(() => {
         void this.drive(ctx);
-      });
+      }, 0);
     }
 
     return this.handleFor(ctx);

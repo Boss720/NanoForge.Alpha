@@ -193,7 +193,12 @@ export function runTerminalJob(
   const events = new EventEmitter();
   events.setMaxListeners(0);
   const emit = (event: TerminalEvent): void => {
-    events.emit(event.type, event);
+    // Node treats an unobserved `error` event as a thrown exception. A spawn
+    // failure is a normal terminal-job outcome, so it must still settle the
+    // returned promise when callers only subscribe to the wildcard stream.
+    if (event.type !== "error" || events.listenerCount("error") > 0) {
+      events.emit(event.type, event);
+    }
     events.emit("*", event);
   };
   const now = () => new Date().toISOString();
