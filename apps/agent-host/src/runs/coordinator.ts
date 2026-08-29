@@ -373,7 +373,14 @@ export class RunCoordinator {
       this.finish(ctx, "failed", `plan validation failed: ${validation.errors.map((e) => e.message).join("; ")}`);
     } else {
       this.emit(ctx, { type: "plan.validated", planId: plan.id, ok: true });
-      void this.drive(ctx);
+      // Keep submission transport-responsive.  `drive()` performs synchronous
+      // audit/event work before its first await; starting it inline lets a
+      // burst of valid submissions delay every `plan.submit.result` frame
+      // behind that work.  Schedule execution for the next check phase so the
+      // caller can publish the run handle and its acknowledgement first.
+      setImmediate(() => {
+        void this.drive(ctx);
+      });
     }
 
     return this.handleFor(ctx);

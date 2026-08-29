@@ -183,148 +183,168 @@ describe("Streaming Deltas & Turn Protocol", () => {
         signature: "sig_abc123",
       };
       const parsed = providerDeltaSchema.parse(delta);
- …78640 tokens truncated…ionMs: z.number().nonnegative().default(0),
-  inferenceDurationMs: z.number().nonnegative().optional(),
-  toolDurationMs: z.number().nonnegative().optional(),
-  queueDurationMs: z.number().nonnegative().optional(),
+      expect(parsed).toEqual(delta);
+      expect(isTerminalDelta(parsed)).toBe(false);
+    });
+
+    it("parses tool_proposal delta with custom risk tier and arguments", () => {
+      const delta: ProviderDelta = {
+        type: "tool_proposal",
+        callId: "call-1",
+        name: "replace_file_content",
+        args: { filePath: "src/index.ts", content: "export *" },
+        riskTier: "T1_WORKSPACE_WRITE",
+        justification: "Export new modules",
+      };
+      const parsed = providerDeltaSchema.parse(delta);
+      expect(parsed).toEqual(delta);
+      expect(isTerminalDelta(parsed)).toBe(false);
+    });
+
+    it("parses usage delta with both structured usage and loose token counters", () => {
+      const delta: ProviderDelta = {
+        type: "usage",
+        usage: {
+          promptTokens: 1500,
+          completionTokens: 300,
+          totalTokens: 1800,
+        },
+        inputTokens: 1500,
+        outputTokens: 300,
+      };
+      const parsed = providerDeltaSchema.parse(delta);
+      expect(parsed).toEqual(delta);
+      expect(isTerminalDelta(parsed)).toBe(false);
+    });
+
+    it("parses error delta and marks it as terminal", () => {
+      const delta: ProviderDelta = {
+        type: "error",
+        code: "RATE_LIMIT_EXCEEDED",
+        message: "Anthropic rate limit reached. Backing off.",
+        retryable: true,
+      };
+      const parsed = providerDeltaSchema.parse(delta);
+      expect(parsed).toEqual(delta);
+      expect(isTerminalDelta(parsed)).toBe(true);
+    });
+
+    it("parses done delta with finish reason and marks it as terminal", () => {
+      const delta: ProviderDelta = {
+        type: "done",
+        finishReason: "tool_calls",
+        usage: {
+          promptTokens: 2000,
+          completionTokens: 400,
+          totalTokens: 2400,
+        },
+      };
+      const parsed = providerDeltaSchema.parse(delta);
+      expect(parsed).toEqual(delta);
+      expect(isTerminalDelta(parsed)).toBe(true);
+    });
+
+    it("rejects delta with unknown type tag", () => {
+      expect(() =>
+        providerDeltaSchema.parse({
+          type: "unknown_delta_type",
+        })
+      ).toThrow();
+    });
+  });
+
+  describe("Turn Synchronization & Turn Events", () => {
+    it("validates all turn speakers and turn states", () => {
+      const speakers: TurnSpeaker[] = ["user", "agent", "tool", "system"];
+      for (const speaker of speakers) {
+        expect(turnSpeakerSchema.parse(speaker)).toBe(speaker);
+      }
+
+      const states: TurnState[] = [
+        "started",
+        "thinking",
+        "executing",
+        "completed",
+        "interrupted",
+        "error",
+      ];
+      for (const state of states) {
+        expect(turnStateSchema.parse(state)).toBe(state);
+      }
+    });
+
+    it("validates and round-trips turnSyncSchema", () => {
+      const sync: TurnSync = {
+        sessionId: "sess-1",
+        turnId: "turn-1",
+        turnNumber: 1,
+        speaker: "agent",
+        promptText: "Please list files",
+        responseText: "Here are the files...",
+        toolCallsCount: 1,
+        usage: {
+          promptTokens: 500,
+          completionTokens: 100,
+          totalTokens: 600,
+        },
+        latencyMs: 340,
+        state: "completed",
+        timestamp,
+      };
+
+      const parsed = turnSyncSchema.parse(sync);
+      expect(parsed).toEqual(sync);
+    });
+
+    it("validates and round-trips all turn event types", () => {
+      const events: TurnEvent[] = [
+        {
+          type: "turn.started",
+          sessionId: "sess-1",
+          turnId: "turn-1",
+          turnNumber: 0,
+          speaker: "user",
+          timestamp,
+        },
+        {
+          type: "turn.delta",
+          sessionId: "sess-1",
+          turnId: "turn-1",
+          delta: {
+            type: "text",
+            text: "Processing your request...",
+          },
+          timestamp,
+        },
+        {
+          type: "turn.completed",
+          sessionId: "sess-1",
+          turnId: "turn-1",
+          turn: {
+            sessionId: "sess-1",
+            turnId: "turn-1",
+            turnNumber: 0,
+            speaker: "user",
+            state: "completed",
+            toolCallsCount: 0,
+            timestamp,
+          },
+          timestamp,
+        },
+        {
+          type: "turn.error",
+          sessionId: "sess-1",
+          turnId: "turn-1",
+          code: "TIMEOUT",
+          message: "Turn timed out after 30s",
+          timestamp,
+        },
+      ];
+
+      for (const event of events) {
+        const parsed = turnEventSchema.parse(JSON.parse(JSON.stringify(event)));
+        expect(parsed).toEqual(event);
+      }
+    });
+  });
 });
-export type LatencyMetrics = z.infer<typeof latencyMetricsSchema>;
-
-/* ------------------------------------------------------------------ */
-/* 2. Model Pricing Catalog & Cost Calculation                        */
-/* ------------------------------------------------------------------ */
-
-export const modelPricingSchema = z.object({
-  modelId: z.string().min(1),
-  provider: z.string().min(1),
-  inputCostPer1M: z.number().nonnegative(),
-  outputCostPer1M: z.number().nonnegative(),
-  cacheReadCostPer1M: z.number().nonnegative().optional(),
-  cacheWriteCostPer1M: z.number().nonnegative().optional(),
-});
-export type ModelPricing = z.infer<typeof modelPricingSchema>;
-
-export const sessionSpendSummarySchema = z.object({
-  sessionId: z.string().min(1),
-  totalTurns: z.number().int().nonnegative().default(0),
-  totalTokens: tokenSpendMetricsSchema,
-  totalLatency: latencyMetricsSchema,
-  toolCallCounts: z.record(z.string(), z.number().int().nonnegative()).default({}),
-  startedAt: z.string().datetime(),
-  endedAt: z.string().datetime().optional(),
-});
-export type SessionSpendSummary = z.infer<typeof sessionSpendSummarySchema>;
-
-/* ------------------------------------------------------------------ */
-/* 3. Predefined Model Pricing Catalog                                */
-/* ------------------------------------------------------------------ */
-
-export const KNOWN_MODEL_PRICING: Readonly<Record<string, ModelPricing>> = {
-  "claude-3-7-sonnet": {
-    modelId: "claude-3-7-sonnet",
-    provider: "anthropic",
-    inputCostPer1M: 3.0,
-    outputCostPer1M: 15.0,
-    cacheReadCostPer1M: 0.3,
-    cacheWriteCostPer1M: 3.75,
-  },
-  "claude-3-5-sonnet": {
-    modelId: "claude-3-5-sonnet",
-    provider: "anthropic",
-    inputCostPer1M: 3.0,
-    outputCostPer1M: 15.0,
-    cacheReadCostPer1M: 0.3,
-    cacheWriteCostPer1M: 3.75,
-  },
-  "claude-3-5-haiku": {
-    modelId: "claude-3-5-haiku",
-    provider: "anthropic",
-    inputCostPer1M: 0.8,
-    outputCostPer1M: 4.0,
-    cacheReadCostPer1M: 0.08,
-    cacheWriteCostPer1M: 1.0,
-  },
-  "gpt-4o": {
-    modelId: "gpt-4o",
-    provider: "openai",
-    inputCostPer1M: 2.5,
-    outputCostPer1M: 10.0,
-    cacheReadCostPer1M: 1.25,
-  },
-  "gpt-4o-mini": {
-    modelId: "gpt-4o-mini",
-    provider: "openai",
-    inputCostPer1M: 0.15,
-    outputCostPer1M: 0.6,
-    cacheReadCostPer1M: 0.075,
-  },
-  "o3-mini": {
-    modelId: "o3-mini",
-    provider: "openai",
-    inputCostPer1M: 1.1,
-    outputCostPer1M: 4.4,
-    cacheReadCostPer1M: 0.55,
-  },
-  "ollama/local": {
-    modelId: "ollama/local",
-    provider: "ollama",
-    inputCostPer1M: 0.0,
-    outputCostPer1M: 0.0,
-  },
-};
-
-/* ------------------------------------------------------------------ */
-/* 4. Pure Helper Utilities                                           */
-/* ------------------------------------------------------------------ */
-
-export function calculateEstimatedCostUsd(
-  pricing: ModelPricing,
-  usage: {
-    promptTokens: number;
-    completionTokens: number;
-    cachedReadTokens?: number;
-    cachedWriteTokens?: number;
-  }
-): number {
-  const prompt = Math.max(0, usage.promptTokens);
-  const completion = Math.max(0, usage.completionTokens);
-  const cachedRead = Math.min(prompt, Math.max(0, usage.cachedReadTokens ?? 0));
-  const cachedWrite = Math.max(0, usage.cachedWriteTokens ?? 0);
-  const unCachedPrompt = Math.max(0, prompt - cachedRead);
-
-  const inputCost = (unCachedPrompt / 1_000_000) * pricing.inputCostPer1M;
-  const outputCost = (completion / 1_000_000) * pricing.outputCostPer1M;
-  const cacheReadCost = (cachedRead / 1_000_000) * (pricing.cacheReadCostPer1M ?? pricing.inputCostPer1M);
-  const cacheWriteCost = (cachedWrite / 1_000_000) * (pricing.cacheWriteCostPer1M ?? pricing.inputCostPer1M);
-
-  const total = inputCost + outputCost + cacheReadCost + cacheWriteCost;
-  return Math.round(total * 1_000_000) / 1_000_000;
-}
-
-export function createEmptySpendMetrics(): TokenSpendMetrics {
-  return {
-    promptTokens: 0,
-    completionTokens: 0,
-    totalTokens: 0,
-    cachedReadTokens: 0,
-    cachedWriteTokens: 0,
-    estimatedCostUsd: 0,
-  };
-}
-
-export function aggregateSessionSpend(metricsList: TokenSpendMetrics[]): TokenSpendMetrics {
-  return metricsList.reduce((acc, curr) => ({
-    promptTokens: acc.promptTokens + curr.promptTokens,
-    completionTokens: acc.completionTokens + curr.completionTokens,
-    totalTokens: acc.totalTokens + curr.totalTokens,
-    cachedReadTokens: (acc.cachedReadTokens ?? 0) + (curr.cachedReadTokens ?? 0),
-    cachedWriteTokens: (acc.cachedWriteTokens ?? 0) + (curr.cachedWriteTokens ?? 0),
-    estimatedCostUsd: Math.round(((acc.estimatedCostUsd ?? 0) + (curr.estimatedCostUsd ?? 0)) * 1_000_000) / 1_000_000,
-  }), createEmptySpendMetrics());
-}
-
-export function formatCostUsd(usd: number): string {
-  if (!Number.isFinite(usd) || usd <= 0) return "$0.00";
-  if (usd < 0.01) return `$${usd.toFixed(4)}`;
-  return `$${usd.toFixed(2)}`;
-}

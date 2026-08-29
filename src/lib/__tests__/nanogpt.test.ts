@@ -8,723 +8,329 @@ describe("toPerMillion", () => {
   });
 
   it("scales per-token values below 0.01 up to per-million", () => {
-    expect(toPerMillion(0.0000…56221 tokens truncated…n    };
-    // settings primitives only — a new settings object with the same values
-    // must NOT reconnect.
-  }, [connKey, settings.port, settings.token, handleHostMessage, closeActiveClient]);
-
-  const reconnectToWorkspace = useCallback(async (connection: WorkspaceBrokerConnection): Promise<HostWorkspaceDescriptor | null> => {
-    const current = clientRef.current;
-    setRuntimeState("switching");
-
-    let candidate: HostClientLike | null = null;
-    try {
-      candidate = (createClient ?? ((o: { port?: number; token?: string; websocketUrl?: string }) => new HostClient(o)))({
-        ...(connection.websocketUrl ? { websocketUrl: connection.websocketUrl } : {}),
-        ...(connection.port !== undefined ? { port: connection.port } : {}),
-        ...(connection.token ? { token: connection.token } : {}),
-      });
-      await candidate.connect();
-      if (!candidate.describeWorkspace) throw new Error("Replacement local host cannot describe its workspace");
-      const descriptor = await candidate.describeWorkspace();
-      if (descriptor.generation !== connection.generation) {
-        throw new Error(`Replacement host generation ${descriptor.generation} does not match broker generation ${connection.generation}`);
-      }
-
-      // The candidate has proved it represents the broker-selected workspace.
-      // Only now retire the old host, so a failed candidate leaves it usable.
-      clientUnsubscribeRef.current?.();
-      clientUnsubscribeRef.current = null;
-      clientRef.current = candidate;
-      clientUnsubscribeRef.current = candidate.onEvent((message) => {
-        if (clientRef.current === candidate) handleHostMessage(message);
-      });
-      current?.close();
-
-      // Workspace-scoped transient UI cannot cross a host generation.
-      toolRunOwners.current.clear();
-      pendingGrants.current.clear();
-      setToolRuns([]);
-      setRoute(null);
-      setEvidence(null);
-      setLastError(null);
-      setConnectOutcome({ key: `${connection.port ?? "url"}:${connection.token ?? ""}`, error: null });
-      setRuntimeState("ready");
-      return descriptor;
-    } catch (error) {
-      candidate?.close();
-      const message = error instanceof Error ? error.message : String(error);
-      setLastError(message);
-      if (current) {
-        setRuntimeState("healthy");
-      } else {
-        setRuntimeState(isNonRetryableError(error) ? "needs_attention" : "unavailable");
-      }
-      return null;
-    }
-  }, [createClient, handleHostMessage]);
-
-  /* ------------------------- actions ---------------------------------- */
-
-  const setPlan = useCallback((next: ExecutionPlan | null) => {
-    setPlanState(next);
-    if (!next) {
-      // Run evidence belongs to a plan/run; clearing the plan clears it too.
-      setEvidence(null);
-      setRoute(null);
-    }
-  }, []);
-
-  const approveStep = useCallback(
-    (planId: string, stepId: string) => {
-      const current = latest.current.plan;
-      const step = current && current.id === planId ? current.steps.find((s) => s.id === stepId) : undefined;
-      const origin = step ? browserScopeOrigin(step) : null;
-      if (origin) {
-        // Task 10: the approval of a browser step routes through the origin
-        // permission prompt FIRST; the host grant follows the user's decision
-        // (see decidePermission). Chat text never reaches this path — only
-        // PlanPanel's explicit Approve button calls it.
-        requestOriginGrant(planId, stepId, origin, origin);
-        return;
-      }
-      sendGrant(planId, stepId, true);
-    },
-    [requestOriginGrant, sendGrant],
-  );
-
-  const runApproved = useCallback((planId: string) => {
-    const current = latest.current.plan;
-    const client = clientRef.current;
-    if (!current || current.id !== planId || !client) return;
-    // Convention: (re)submitting the approved plan starts/resumes its run.
-    void client.submitPlan(current).catch((err: unknown) => {
-      const message = err instanceof Error ? err.message : String(err);
-      setLastError(message);
-    });
-  }, []);
-
-  const pause = useCallback((planId: string) => {
-    void clientRef.current?.pauseRun(planId).catch((err: unknown) => {
-      const message = err instanceof Error ? err.message : String(err);
-      setLastError(message);
-    });
-  }, []);
-
-  const cancel = useCallback((planId: string) => {
-    void clientRef.current?.cancelRun(planId).catch((err: unknown) => {
-      const message = err instanceof Error ? err.message : String(err);
-      setLastError(message);
-    });
-  }, []);
-
-  const stopToolRun = useCallback((toolRunId: string) => {
-    const client = clientRef.current;
-    if (!client) return;
-    // The protocol cancels whole runs; map the card back to its owning run.
-    const runId = toolRunOwners.current.get(toolRunId) ?? toolRunId;
-    void client.cancelRun(runId).catch((err: unknown) => {
-      const message = err instanceof Error ? err.message : String(err);
-      setLastError(message);
-    });
-  }, []);
-
-  const decidePermission = useCallback(
-    (decision: BrowserPermissionDecision) => {
-      perms.decide(decision); // the reducer keeps the grants ledger
-      const key =
-        decision.kind === "origin"
-          ? originGrantKey(decision.origin)
-          : sensitiveGrantKey(decision.action, decision.origin);
-      const pend = pendingGrants.current.get(key);
-      pendingGrants.current.delete(key);
-      if (!pend) return; // prompt had no host grant attached (defensive)
-      const approved = decision.kind === "origin" ? decision.decision !== "deny" : decision.approved;
-      sendGrant(pend.runId, pend.stepId, approved);
-    },
-    [perms, sendGrant],
-  );
-
-  const decideCapabilityApproval = useCallback((requestId: string, approved: boolean) => {
-    const pending = capabilityApprovalPending;
-    if (!pending || pending.requestId !== requestId) return;
-    const client = clientRef.current;
-    if (!client?.respondToCapabilityApproval) {
-      setLastError("This local host cannot accept capability approvals. Reconnect and try again.");
-      return;
-    }
-    setCapabilityApprovalPending(null);
-    void client.respondToCapabilityApproval(requestId, approved).catch((err: unknown) => {
-      const message = err instanceof Error ? err.message : String(err);
-      setLastError(message);
-      setCapabilityApprovalPending(pending);
-    });
-  }, [capabilityApprovalPending]);
-
-  const toggleIntegration = useCallback((kind: "rules" | "skill" | "mcp", id: string, enabled: boolean) => {
-    setIntegrations((prev) => ({
-      rulesPacks:
-        kind === "rules" ? prev.rulesPacks.map((row) => (row.id === id ? { ...row, enabled } : row)) : prev.rulesPacks,
-      skills:
-        kind === "skill" ? prev.skills.map((row) => (row.id === id ? { ...row, enabled } : row)) : prev.skills,
-      mcpServers:
-        kind === "mcp" ? prev.mcpServers.map((row) => (row.id === id ? { ...row, enabled } : row)) : prev.mcpServers,
-    }));
-    const p = clientRef.current?.toggleIntegration?.(kind, id, enabled);
-    void p?.catch((err: unknown) => {
-      const message = err instanceof Error ? err.message : String(err);
-      setLastError(message);
-    });
-  }, []);
-
-  /* ------------------------- Subagent & Task RPC Dispatchers ------------------------- */
-
-  const spawnSubagent = useCallback(
-    async (params: InvokeSubagentParams, parentId?: string): Promise<InvokeSubagentResult | null> => {
-      const client = clientRef.current;
-      if (!client || !client.invokeSubagent) return null;
-      try {
-        const res = await client.invokeSubagent(params, parentId);
-        setSubagents((prev) =>
-          upsertSubagent(prev, {
-            id: res.subagentId,
-            parentId: parentId ?? null,
-            name: res.name,
-            archetype: res.archetype,
-            roles: params.roles ?? [],
-            state: res.state,
-            workingDirectory: res.workingDirectory,
-            isolationMode: params.workspaceIsolation ?? "inherit",
-            startedAt: res.startedAt,
-            lastHeartbeat: res.startedAt,
-            tokensUsed: 0,
-            turnCount: 0,
-          }),
-        );
-        return res;
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        setLastError(message);
-        throw err;
-      }
-    },
-    [],
-  );
-
-  const manageSubagentsAction = useCallback(
-    async (params: ManageSubagentsParams): Promise<ManageSubagentsResult | null> => {
-      const client = clientRef.current;
-      if (!client || !client.manageSubagents) return null;
-      try {
-        const res = await client.manageSubagents(params);
-        if (params.action === "list" && res.subagents) {
-          setSubagents(res.subagents);
-        } else if (params.action === "status" && res.detail) {
-          setSubagents((prev) => upsertSubagent(prev, res.detail!));
-        } else if (params.action === "kill" && params.subagentId) {
-          if (params.recursive) {
-            setSubagents((prev) =>
-              prev.map((s) =>
-                s.id === params.subagentId || s.parentId === params.subagentId
-                  ? { ...s, state: "errored", error: "Terminated by user" }
-                  : s,
-              ),
-            );
-          } else {
-            setSubagents((prev) =>
-              prev.map((s) =>
-                s.id === params.subagentId
-                  ? { ...s, state: "errored", error: "Terminated by user" }
-                  : s,
-              ),
-            );
-          }
-        }
-        return res;
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        setLastError(message);
-        throw err;
-      }
-    },
-    [],
-  );
-
-  const killSubagent = useCallback(
-    async (subagentId: string): Promise<ManageSubagentsResult | null> => {
-      return manageSubagentsAction({ action: "kill", subagentId, recursive: false });
-    },
-    [manageSubagentsAction],
-  );
-
-  const killSubagentTree = useCallback(
-    async (subagentId: string): Promise<ManageSubagentsResult | null> => {
-      return manageSubagentsAction({ action: "kill", subagentId, recursive: true });
-    },
-    [manageSubagentsAction],
-  );
-
-  const sendAgentMessage = useCallback(
-    async (
-      recipientId: string,
-      body: string,
-      options?: { subject?: string; referencedArtifacts?: string[]; priority?: "high" | "normal" | "low" },
-    ): Promise<SendMessageResult | null> => {
-      const client = clientRef.current;
-      if (!client || !client.sendMessage) return null;
-      try {
-        const res = await client.sendMessage({
-          recipientId,
-          subject: options?.subject ?? "Direct Message",
-          body,
-          referencedArtifacts: options?.referencedArtifacts ?? [],
-          priority: options?.priority ?? "normal",
-        });
-        const msgFrame: SubagentMessage = {
-          messageId: res.messageId,
-          senderId: "00000000-0000-0000-0000-000000000000",
-          senderName: "Operator / UI",
-          recipientId,
-          timestamp: res.deliveryTimestamp,
-          subject: options?.subject ?? "Direct Message",
-          body,
-          referencedArtifacts: options?.referencedArtifacts ?? [],
-          priority: options?.priority ?? "normal",
-        };
-        setInterAgentMessages((prev) => [...prev, msgFrame]);
-        return res;
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        setLastError(message);
-        throw err;
-      }
-    },
-    [],
-  );
-
-  const defineSubagent = useCallback(
-    async (params: DefineSubagentParams): Promise<DefineSubagentResult | null> => {
-      const client = clientRef.current;
-      if (!client || !client.defineSubagent) return null;
-      try {
-        return await client.defineSubagent(params);
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        setLastError(message);
-        throw err;
-      }
-    },
-    [],
-  );
-
-  const executeCommand = useCallback(
-    async (input: ExecuteCommandInput): Promise<CommandResultFrame> => {
-      const client = clientRef.current;
-      const execute = client?.executeCommand ?? client?.dispatchCommand;
-      if (!execute) {
-        return {
-          type: "command.result",
-          command: input.command,
-          success: false,
-          error: "Host does not support command execution",
-          data: { code: "unsupported_capability" },
-        };
-      }
-      try {
-        return await execute.call(client, input);
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        setLastError(message);
-        throw err;
-      }
-    },
-    [],
-  );
-
-  const dispatchCommand = useCallback(
-    (input: ExecuteCommandInput): Promise<CommandResultFrame> => executeCommand(input),
-    [executeCommand],
-  );
-
-  const withWorkspaceClient = useCallback(async <T,>(operation: (client: HostClientLike) => Promise<T>): Promise<T | null> => {
-    const client = clientRef.current;
-    if (!client) {
-      setLastError("Cannot perform workspace operation while the local host is unavailable");
-      return null;
-    }
-    try {
-      return await operation(client);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      setLastError(message);
-      if (isNonRetryableError(err)) {
-        setRuntimeState("needs_attention");
-      }
-      return null;
-    }
-  }, []);
-
-  const readWorkspaceDirectory = useCallback((path = "") => withWorkspaceClient((client) =>
-    client.readDir ? client.readDir(path) : Promise.reject(new Error("Host does not support workspace directory reads")),
-  ), [withWorkspaceClient]);
-  const readWorkspaceFile = useCallback((path: string) => withWorkspaceClient((client) =>
-    client.readFile ? client.readFile(path) : Promise.reject(new Error("Host does not support workspace file reads")),
-  ), [withWorkspaceClient]);
-  const writeWorkspaceFile = useCallback(
-    async (path: string, content: string, options?: { expectedSha256?: string; expectedModified?: string }): Promise<WorkspaceWriteResult | null> => {
-      const client = clientRef.current;
-      if (!client) return null;
-      if (!client.writeFile) throw new Error("Host does not support reviewed workspace writes");
-      try {
-        return await client.writeFile(path, content, options);
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        setLastError(message);
-        throw err;
-      }
-    },
-    [],
-  );
-  const statWorkspaceFile = useCallback((path: string) => withWorkspaceClient((client) =>
-    client.stat ? client.stat(path) : Promise.reject(new Error("Host does not support workspace file stats")),
-  ), [withWorkspaceClient]);
-  const searchWorkspace = useCallback((query: string, options?: { maxResults?: number }) => withWorkspaceClient((client) =>
-    client.search ? client.search(query, options) : Promise.reject(new Error("Host does not support workspace search")),
-  ), [withWorkspaceClient]);
-  const workspaceGitStatus = useCallback(() => withWorkspaceClient((client) =>
-    client.gitStatus ? client.gitStatus() : Promise.reject(new Error("Host does not support Git status")),
-  ), [withWorkspaceClient]);
-  const watchWorkspace = useCallback(async () => (await withWorkspaceClient((client) =>
-    client.watch ? client.watch() : Promise.reject(new Error("Host does not support workspace watching")),
-  )) !== null, [withWorkspaceClient]);
-  const unwatchWorkspace = useCallback(async () => (await withWorkspaceClient((client) =>
-    client.unwatch ? client.unwatch() : Promise.reject(new Error("Host does not support workspace watching")),
-  )) !== null, [withWorkspaceClient]);
-  const selectWorkspace = useCallback((selectionToken: string) => withWorkspaceClient(async (client) => {
-    if (!client.selectWorkspace && !client.openWorkspace) {
-      throw new Error("This local host cannot open folders yet");
-    }
-    setRuntimeState("switching");
-    try {
-      const desc = client.selectWorkspace
-        ? await client.selectWorkspace(selectionToken)
-        : await client.openWorkspace!(selectionToken);
-      setRuntimeState("ready");
-      return desc;
-    } catch (err) {
-      if (isNonRetryableError(err)) {
-        setRuntimeState("needs_attention");
-      }
-      throw err;
-    }
-  }), [withWorkspaceClient]);
-  const openWorkspace = useCallback((path: string) => withWorkspaceClient(async (client) => {
-    if (!client.openWorkspace && !client.selectWorkspace) {
-      throw new Error("This local host cannot open folders yet");
-    }
-    setRuntimeState("switching");
-    try {
-      const desc = client.openWorkspace
-        ? await client.openWorkspace(path)
-        : await client.selectWorkspace!(path);
-      setRuntimeState("ready");
-      return desc;
-    } catch (err) {
-      if (isNonRetryableError(err)) {
-        setRuntimeState("needs_attention");
-      }
-      throw err;
-    }
-  }), [withWorkspaceClient]);
-
-  const manageTask = useCallback(
-    async (params: ManageTaskParams): Promise<ManageTaskResult | null> => {
-      const client = clientRef.current;
-      if (!client || !client.manageTask) return null;
-      try {
-        const res = await client.manageTask(params);
-        if (params.action === "list" && res.tasks) {
-          setDaemonTasks(res.tasks);
-        } else if (params.action === "status" && res.task) {
-          setDaemonTasks((prev) => upsertTask(prev, res.task!));
-        } else if (params.action === "kill" && params.taskId) {
-          setDaemonTasks((prev) =>
-            prev.map((t) => (t.taskId === params.taskId ? { ...t, status: "killed" } : t)),
-          );
-        }
-        return res;
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        setLastError(message);
-        throw err;
-      }
-    },
-    [],
-  );
-
-  const createSchedule = useCallback(
-    async (params: ScheduleParams): Promise<ScheduleResult | null> => {
-      const client = clientRef.current;
-      if (!client || !client.createSchedule) return null;
-      try {
-        const res = await client.createSchedule(params);
-        setSchedules((prev) => {
-          const idx = prev.findIndex((s) => s.scheduleId === res.scheduleId);
-          if (idx === -1) return [...prev, res];
-          const copy = prev.slice();
-          copy[idx] = res;
-          return copy;
-        });
-        return res;
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        setLastError(message);
-        throw err;
-      }
-    },
-    [],
-  );
-
-  const cancelSchedule = useCallback(
-    async (scheduleId: string): Promise<ManageTaskResult | null> => {
-      setSchedules((prev) =>
-        prev.map((s) => (s.scheduleId === scheduleId ? { ...s, status: "cancelled" } : s)),
-      );
-      return manageTask({ action: "kill", taskId: scheduleId });
-    },
-    [manageTask],
-  );
-
-  const sendTaskInput = useCallback(
-    async (taskId: string, input: string): Promise<ManageTaskResult | null> => {
-      return manageTask({ action: "send_input", taskId, input });
-    },
-    [manageTask],
-  );
-
-  const killTask = useCallback(
-    async (taskId: string): Promise<ManageTaskResult | null> => {
-      return manageTask({ action: "kill", taskId });
-    },
-    [manageTask],
-  );
-
-  /* ------------------------- Shared Memory & Playground RPCs ------------------------- */
-
-  const setSharedMemory = useCallback(
-    async (
-      key: string,
-      value: unknown,
-      namespace = "global",
-      ttlSeconds?: number,
-      tags: string[] = []
-    ): Promise<MemorySetResult | null> => {
-      const client = clientRef.current;
-      if (!client || !client.setSharedMemory) return null;
-      try {
-        const res = await client.setSharedMemory({
-          key,
-          value: value as any,
-          namespace,
-          ttlSeconds,
-          tags,
-        });
-        if (res?.entry) {
-          setSharedMemoryState((prev) => upsertMemoryEntry(prev, res.entry));
-        }
-        return res;
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        setLastError(message);
-        throw err;
-      }
-    },
-    [],
-  );
-
-  const getSharedMemory = useCallback(
-    async (key: string, namespace = "global"): Promise<MemoryGetResult | null> => {
-      const client = clientRef.current;
-      if (!client || !client.getSharedMemory) return null;
-      try {
-        return await client.getSharedMemory({ key, namespace });
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        setLastError(message);
-        throw err;
-      }
-    },
-    [],
-  );
-
-  const querySharedMemory = useCallback(
-    async (params: MemoryQueryParams): Promise<MemoryQueryResult | null> => {
-      const client = clientRef.current;
-      if (!client || !client.querySharedMemory) return null;
-      try {
-        const res = await client.querySharedMemory(params);
-        if (res?.entries && !params.query && !params.namespace && !params.tags?.length) {
-          setSharedMemoryState(res.entries);
-        }
-        return res;
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        setLastError(message);
-        throw err;
-      }
-    },
-    [],
-  );
-
-  const deleteSharedMemory = useCallback(
-    async (key: string, namespace = "global"): Promise<MemoryDeleteResult | null> => {
-      const client = clientRef.current;
-      if (!client || !client.deleteSharedMemory) return null;
-      try {
-        const res = await client.deleteSharedMemory({ key, namespace });
-        setSharedMemoryState((prev) =>
-          prev.filter((e) => !((e.namespace || "global") === (namespace || "global") && e.key === key))
-        );
-        return res;
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        setLastError(message);
-        throw err;
-      }
-    },
-    [],
-  );
-
-  const dispatchPlaygroundTurn = useCallback(
-    async (subagentId: string, prompt: string) => {
-      const client = clientRef.current;
-      if (!client || !client.dispatchPlaygroundTurn) return null;
-      try {
-        return await client.dispatchPlaygroundTurn(subagentId, prompt);
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        setLastError(message);
-        throw err;
-      }
-    },
-    [],
-  );
-
-  const simulateAgentTurn = useCallback(
-    async (subagentId: string, scenario: string) => {
-      const client = clientRef.current;
-      if (!client || !client.simulateAgentTurn) return null;
-      try {
-        return await client.simulateAgentTurn(subagentId, scenario);
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        setLastError(message);
-        throw err;
-      }
-    },
-    [],
-  );
-
-  const injectAgentFailure = useCallback(
-    async (
-      subagentId: string,
-      failureType: "timeout" | "crash" | "stall" | "out_of_budget",
-      strategy?: "one_for_one" | "one_for_all" | "rest_for_one"
-    ) => {
-      const client = clientRef.current;
-      if (!client || !client.injectAgentFailure) return null;
-      try {
-        return await client.injectAgentFailure(subagentId, failureType, strategy);
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        setLastError(message);
-        throw err;
-      }
-    },
-    [],
-  );
-
-  /* ------------------------- derived props ---------------------------- */
-
-  const routeDecision: RouteDecisionCardProps | null = route
-    ? {
-        decision: route.decision,
-        pendingFallback: route.pendingFallback,
-        preApprovedFallbacks: route.preApprovedFallbacks,
-        onApproveFallback: (modelId) => sendGrant(route.runId, ROUTE_FALLBACK_STEP_PREFIX + modelId, true),
-        onRejectFallback: (modelId) => sendGrant(route.runId, ROUTE_FALLBACK_STEP_PREFIX + modelId, false),
-      }
-    : null;
-
-  const api: HostSession = {
-    enabled,
-    status,
-    runtimeState,
-    isOperational: runtimeState === "ready" || runtimeState === "healthy",
-    // a stale error from a previous connection must not surface once disabled
-    lastError: connKey ? lastError : null,
-    plan,
-    toolRuns,
-    routeDecision,
-    integrations,
-    evidence,
-    permissionPending: perms.pending,
-    capabilityApprovalPending,
-    subagents,
-    activeSubagentId,
-    interAgentMessages,
-    daemonTasks,
-    schedules,
-    sharedMemory,
-    setPlan,
-    approveStep,
-    runApproved,
-    pause,
-    cancel,
-    stopToolRun,
-    decidePermission,
-    decideCapabilityApproval,
-    toggleRulesPack: (id, enabled) => toggleIntegration("rules", id, enabled),
-    toggleSkill: (id, enabled) => toggleIntegration("skill", id, enabled),
-    toggleMcpServer: (id, enabled) => toggleIntegration("mcp", id, enabled),
-    setActiveSubagentId,
-    spawnSubagent,
-    killSubagent,
-    killSubagentTree,
-    sendAgentMessage,
-    manageSubagentsAction,
-    defineSubagent,
-    executeCommand,
-    dispatchCommand,
-    readWorkspaceDirectory,
-    readWorkspaceFile,
-    writeWorkspaceFile,
-    statWorkspaceFile,
-    searchWorkspace,
-    workspaceGitStatus,
-    watchWorkspace,
-    unwatchWorkspace,
-    selectWorkspace,
-    openWorkspace,
-    reconnectToWorkspace,
-    manageTask,
-    createSchedule,
-    cancelSchedule,
-    sendTaskInput,
-    killTask,
-    setSharedMemory,
-    getSharedMemory,
-    querySharedMemory,
-    deleteSharedMemory,
-    dispatchPlaygroundTurn,
-    simulateAgentTurn,
-    injectAgentFailure,
-  };
-
-  const onApi = options?.onApi;
-  useEffect(() => {
-    onApi?.(api);
+    expect(toPerMillion(0.00000175)).toBe(1.75);
+    expect(toPerMillion(0.000014)).toBe(14);
+    expect(toPerMillion(0.001)).toBe(1000);
   });
 
-  return api;
+  it("passes through values already expressed per-million", () => {
+    expect(toPerMillion(14)).toBe(14);
+    expect(toPerMillion(1.75)).toBe(1.75);
+  });
+
+  it("accepts numeric strings", () => {
+    expect(toPerMillion("0.00000175")).toBe(1.75);
+    expect(toPerMillion("0.01")).toBe(0.01);
+  });
+
+  it("returns 0 for missing/invalid/non-positive input", () => {
+    expect(toPerMillion(undefined)).toBe(0);
+    expect(toPerMillion(null)).toBe(0);
+    expect(toPerMillion("nope")).toBe(0);
+    expect(toPerMillion(0)).toBe(0);
+    expect(toPerMillion(-5)).toBe(0);
+  });
+});
+
+function stubModelsResponse(data: Array<Record<string, unknown>>) {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => new Response(JSON.stringify({ data }), { status: 200 })),
+  );
 }
+
+describe("fetchModels pricing", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("prefers explicit pricing.prompt/completion as per-token values", async () => {
+    stubModelsResponse([
+      {
+        id: "acme/x",
+        name: "X",
+        pricing: { prompt: "0.00000175", completion: "0.000014" },
+        context_length: 64_000,
+      },
+    ]);
+    const models = await fetchModels("http://example.test", "key");
+    expect(models).toHaveLength(1);
+    expect(models[0].inputPrice).toBe(1.75);
+    expect(models[0].outputPrice).toBe(14);
+    expect(models[0].priceEstimated).toBeUndefined();
+    expect(models[0].contextK).toBe(64);
+  });
+
+  it("falls back to the magnitude heuristic and sets priceEstimated", async () => {
+    stubModelsResponse([
+      { id: "acme/y", pricing: { input: 2.5, output: 10 }, context_length: 32_000 },
+    ]);
+    const models = await fetchModels("http://example.test", "key");
+    expect(models[0].inputPrice).toBe(2.5);
+    expect(models[0].outputPrice).toBe(10);
+    expect(models[0].priceEstimated).toBe(true);
+  });
+
+  it("sets priceEstimated when only one explicit per-token field is present", async () => {
+    stubModelsResponse([
+      { id: "acme/z", pricing: { prompt: "0.000001", output: 8 }, context_length: 32_000 },
+    ]);
+    const models = await fetchModels("http://example.test", "key");
+    expect(models[0].inputPrice).toBe(1);
+    expect(models[0].outputPrice).toBe(8);
+    expect(models[0].priceEstimated).toBe(true);
+  });
+});
+
+/** SSE body that streams one delta plus a usage frame, then terminates. */
+function sseBody(): string {
+  return [
+    `data: ${JSON.stringify({ choices: [{ delta: { content: "hi" } }] })}`,
+    `data: ${JSON.stringify({ usage: { prompt_tokens: 3, completion_tokens: 2 } })}`,
+    "data: [DONE]",
+    "",
+  ].join("\n\n");
+}
+
+function stubStreamResponse() {
+  const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+    new Response(sseBody(), { status: 200 }),
+  );
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
+
+function requestBody(fetchMock: ReturnType<typeof stubStreamResponse>): Record<string, unknown> {
+  return JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string);
+}
+
+function silentHandlers() {
+  return { onDelta: () => {}, onDone: () => {}, onError: () => {} };
+}
+
+describe("streamChat generation options (Task 2.3)", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("omits temperature/max_tokens when no options are passed (backwards compatible)", async () => {
+    const fetchMock = stubStreamResponse();
+    await streamChat("http://example.test", "key", "model-x", [{ role: "user", content: "hi" }], silentHandlers());
+    const body = requestBody(fetchMock);
+    expect(body).toMatchObject({ model: "model-x", stream: true });
+    expect(body).not.toHaveProperty("temperature");
+    expect(body).not.toHaveProperty("max_tokens");
+  });
+
+  it("passes temperature and maxTokens into the request body", async () => {
+    const fetchMock = stubStreamResponse();
+    await streamChat(
+      "http://example.test",
+      "key",
+      "model-x",
+      [{ role: "user", content: "hi" }],
+      silentHandlers(),
+      undefined,
+      { temperature: 0.3, maxTokens: 4096 },
+    );
+    const body = requestBody(fetchMock);
+    expect(body.temperature).toBe(0.3);
+    expect(body.max_tokens).toBe(4096);
+  });
+
+  it("streams deltas and reports usage to the handlers", async () => {
+    stubStreamResponse();
+    const deltas: string[] = [];
+    let usage: { input: number; output: number } | null = null;
+    await streamChat(
+      "http://example.test",
+      "key",
+      "model-x",
+      [{ role: "user", content: "hi" }],
+      { onDelta: (d) => deltas.push(d), onDone: (u) => (usage = u), onError: () => {} },
+    );
+    expect(deltas.join("")).toBe("hi");
+    expect(usage).toEqual({ input: 3, output: 2 });
+  });
+});
+
+describe("generateImage", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("POSTs to `${baseUrl}/generate-image` and maps URL results", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({ data: [{ url: "https://img.test/x.png", revised_prompt: "a nicer cat" }] }),
+          { status: 200 },
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const imgs = await generateImage("http://example.test", "key", {
+      prompt: "a cat",
+      model: "img-model",
+      size: "1024x1024",
+      n: 1,
+    });
+    expect(imgs).toEqual([{ url: "https://img.test/x.png", revisedPrompt: "a nicer cat" }]);
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("http://example.test/generate-image");
+    expect((init.headers as Record<string, string>).Authorization).toBe("Bearer key");
+    const body = JSON.parse(init.body as string);
+    expect(body).toMatchObject({ prompt: "a cat", model: "img-model", size: "1024x1024", n: 1 });
+  });
+
+  it("maps base64 (b64_json) results", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ data: [{ b64_json: "aGVsbG8=" }] }), { status: 200 }),
+      ),
+    );
+    const imgs = await generateImage("http://example.test", "key", { prompt: "a dog" });
+    expect(imgs).toEqual([{ b64: "aGVsbG8=" }]);
+  });
+
+  it("omits optional fields when not provided", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+      new Response(JSON.stringify({ data: [{ url: "u" }] }), { status: 200 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    await generateImage("http://example.test", "key", { prompt: "x" });
+    const body = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string);
+    expect(body).toEqual({ prompt: "x" });
+  });
+
+  it("throws NanoGptError carrying the server's error message", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ error: { message: "prompt blocked by policy" } }), {
+            status: 400,
+          }),
+      ),
+    );
+    const promise = generateImage("http://example.test", "key", { prompt: "bad" });
+    await expect(promise).rejects.toThrow("prompt blocked by policy");
+    await expect(
+      generateImage("http://example.test", "key", { prompt: "bad" }),
+    ).rejects.toBeInstanceOf(NanoGptError);
+  });
+
+  it("falls back to HTTP status message when the error body has no message", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("boom", { status: 500 })),
+    );
+    await expect(generateImage("http://example.test", "key", { prompt: "x" })).rejects.toThrow(
+      "HTTP 500",
+    );
+  });
+
+  it("propagates abort as AbortError", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new DOMException("The operation was aborted.", "AbortError");
+      }),
+    );
+    await expect(generateImage("http://example.test", "key", { prompt: "x" })).rejects.toMatchObject({
+      name: "AbortError",
+    });
+  });
+
+  it("throws X402Error with the parsed quote on 402", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({ amount: "0.042", currency: "USDC", network: "Base", payTo: "0xabc" }),
+            { status: 402 },
+          ),
+      ),
+    );
+    try {
+      await generateImage("http://example.test", "key", { prompt: "x" });
+      expect.unreachable("should have thrown");
+    } catch (e) {
+      expect(e).toBeInstanceOf(X402Error);
+      const err = e as X402Error;
+      expect(err.status).toBe(402);
+      expect(err.quote).toMatchObject({ amount: "0.042", currency: "USDC", network: "Base" });
+      expect(err.message).toContain("0.042 USDC on Base");
+    }
+  });
+});
+
+describe("streamChat x402 surfacing", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("reports the quote via onX402 and onError on a 402 response", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({ amount: "0.042", currency: "USDC", network: "Base" }),
+            { status: 402 },
+          ),
+      ),
+    );
+    let errMsg = "";
+    let x402: X402Error | null = null;
+    let done = false;
+    await streamChat("http://example.test", "key", "model-x", [{ role: "user", content: "hi" }], {
+      onDelta: () => {},
+      onDone: () => {
+        done = true;
+      },
+      onError: (m) => {
+        errMsg = m;
+      },
+      onX402: (e) => {
+        x402 = e;
+      },
+    });
+    expect(done).toBe(false);
+    expect(x402).toBeInstanceOf(X402Error);
+    expect(x402!.quote).toMatchObject({ amount: "0.042", currency: "USDC", network: "Base" });
+    expect(errMsg).toContain("402");
+    expect(errMsg).toContain("0.042 USDC on Base");
+  });
+
+  it("still works without an onX402 handler (non-breaking)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("payment required", { status: 402 })),
+    );
+    let errMsg = "";
+    await streamChat("http://example.test", "key", "model-x", [{ role: "user", content: "hi" }], {
+      onDelta: () => {},
+      onDone: () => {},
+      onError: (m) => {
+        errMsg = m;
+      },
+    });
+    expect(errMsg).toContain("402");
+  });
+});
+
+describe("validateKey x402 surfacing", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("includes the parsed quote in the result on 402", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ amount: "0.01", currency: "USDC", network: "Base" }), {
+            status: 402,
+          }),
+      ),
+    );
+    const res = await validateKey("http://example.test", "key");
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain("402");
+    expect(res.error).toContain("0.01 USDC on Base");
+    expect(res.x402).toMatchObject({ amount: "0.01", currency: "USDC" });
+  });
+});

@@ -97,126 +97,58 @@ describe("CLIApprovalGate", () => {
     request: {
       kind: "terminal.exec",
       cwd: ".",
-      execu…28625 tokens truncated…e((e) => {
-      if (e.type === "schedule.triggered") {
-        events.push(e.prompt);
-      }
-    });
+      executable: "npm",
+      args: ["install"],
+    },
+  };
 
-    // Schedule 1-second timer (simulate by mocking or short duration)
-    const result = scheduler.schedule({
-      prompt: "Check build status",
-      durationSeconds: 1,
-      timerCondition: "never",
-    });
+  it("mode: none immediately denies all approval requests (fail-closed)", async () => {
+    const onApproval = vi.fn();
+    const gate = new CLIApprovalGate({ mode: "none", onApprovalRequest: onApproval });
 
-    expect(result.type).toBe("one_shot");
-    expect(result.status).toBe("active");
+    const outcome1 = await gate.requestApproval(safeReq);
+    expect(outcome1.outcome).toBe("denied");
+    if (outcome1.outcome === "denied") {
+      expect(outcome1.reason).toContain("denied under --auto-approve=none");
+    }
 
-    // Wait for timer to trigger
-    await new Promise((r) => setTimeout(r, 1100));
+    const outcome2 = await gate.requestApproval(mutatingReq);
+    expect(outcome2.outcome).toBe("denied");
+    if (outcome2.outcome === "denied") {
+      expect(outcome2.reason).toContain("denied under --auto-approve=none");
+    }
 
-    expect(events).toContain("Check build status");
-    const rec = scheduler.getSchedule(result.scheduleId);
-    expect(rec?.status).toBe("completed");
+    expect(onApproval).toHaveBeenCalledTimes(2);
   });
 
-  it("cancels one-shot timer early when condition is 'any' and message arrives", () => {
-    const result = scheduler.schedule({
-      prompt: "Check subagents",
-      durationSeconds: 60,
-      timerCondition: "any",
-    });
+  it("mode: safe grants safe operations and denies mutating operations", async () => {
+    const onApproval = vi.fn();
+    const gate = new CLIApprovalGate({ mode: "safe", onApprovalRequest: onApproval });
 
-    expect(result.status).toBe("active");
+    const safeOutcome = await gate.requestApproval(safeReq);
+    expect(safeOutcome.outcome).toBe("granted");
 
-    const cancelledIds = scheduler.notifyMessageReceived("sender-123");
-    expect(cancelledIds).toContain(result.scheduleId);
+    const mutatingOutcome = await gate.requestApproval(mutatingReq);
+    expect(mutatingOutcome.outcome).toBe("denied");
+    if (mutatingOutcome.outcome === "denied") {
+      expect(mutatingOutcome.reason).toContain("not safe under --auto-approve=safe");
+    }
 
-    const rec = scheduler.getSchedule(result.scheduleId);
-    expect(rec?.status).toBe("cancelled");
+    expect(onApproval).toHaveBeenCalledWith(safeReq, true);
+    expect(onApproval).toHaveBeenCalledWith(mutatingReq, false, expect.any(String));
   });
 
-  it("cancels one-shot timer early when condition is '<senderId>' and matching message arrives", () => {
-    const targetSender = "550e8400-e29b-41d4-a716-446655440000";
-    const otherSender = "660e8400-e29b-41d4-a716-446655440000";
+  it("mode: all auto-grants all approval requests", async () => {
+    const onApproval = vi.fn();
+    const gate = new CLIApprovalGate({ mode: "all", onApprovalRequest: onApproval });
 
-    const result = scheduler.schedule({
-      prompt: "Waiting for specific subagent",
-      durationSeconds: 60,
-      timerCondition: targetSender,
-    });
+    const safeOutcome = await gate.requestApproval(safeReq);
+    expect(safeOutcome.outcome).toBe("granted");
 
-    // Non-matching sender does NOT cancel
-    const uncancelled = scheduler.notifyMessageReceived(otherSender);
-    expect(uncancelled).not.toContain(result.scheduleId);
-    expect(scheduler.getSchedule(result.scheduleId)?.status).toBe("active");
+    const mutatingOutcome = await gate.requestApproval(mutatingReq);
+    expect(mutatingOutcome.outcome).toBe("granted");
 
-    // Matching sender cancels
-    const cancelled = scheduler.notifyMessageReceived(targetSender);
-    expect(cancelled).toContain(result.scheduleId);
-    expect(scheduler.getSchedule(result.scheduleId)?.status).toBe("cancelled");
-  });
-
-  it("synthesizes fallback trigger when monitored sender terminates", () => {
-    const targetSender = "770e8400-e29b-41d4-a716-446655440000";
-    const triggers: string[] = [];
-    scheduler.subscribe((e) => {
-      if (e.type === "schedule.triggered") triggers.push(e.prompt);
-    });
-
-    const result = scheduler.schedule({
-      prompt: "Check task",
-      durationSeconds: 600,
-      timerCondition: targetSender,
-    });
-
-    const triggeredIds = scheduler.notifySenderDied(targetSender);
-    expect(triggeredIds).toContain(result.scheduleId);
-    expect(triggers.some((t) => t.includes("[FALLBACK: Sender"))).toBe(true);
-  });
-
-  it("registers 5-field cron recurring jobs and calculates next run time", () => {
-    const result = scheduler.schedule({
-      prompt: "Hourly lint check",
-      cronExpression: "0 * * * *",
-      maxIterations: 5,
-      isDaemon: true,
-    });
-
-    expect(result.type).toBe("cron");
-    expect(result.status).toBe("active");
-    expect(result.nextRunAt).toBeDefined();
-
-    const rec = scheduler.getSchedule(result.scheduleId);
-    expect(rec?.cronExpression).toBe("0 * * * *");
-    expect(rec?.maxIterations).toBe(5);
-  });
-
-  it("cancels all non-daemon schedules when creator subagent terminates", () => {
-    const creatorId = "creator-agent-1";
-
-    const s1 = scheduler.schedule(
-      {
-        prompt: "Short timer",
-        durationSeconds: 300,
-        isDaemon: false,
-      },
-      creatorId
-    );
-
-    const s2 = scheduler.schedule(
-      {
-        prompt: "Daemon cron",
-        cronExpression: "*/10 * * * *",
-        isDaemon: true,
-      },
-      creatorId
-    );
-
-    scheduler.cancelByCreator(creatorId);
-
-    expect(scheduler.getSchedule(s1.scheduleId)?.status).toBe("cancelled");
-    expect(scheduler.getSchedule(s2.scheduleId)?.status).toBe("active"); // Daemon persists
+    expect(onApproval).toHaveBeenCalledWith(safeReq, true);
+    expect(onApproval).toHaveBeenCalledWith(mutatingReq, true);
   });
 });

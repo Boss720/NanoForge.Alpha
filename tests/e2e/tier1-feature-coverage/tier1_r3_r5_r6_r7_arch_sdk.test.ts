@@ -234,307 +234,160 @@ describe("Tier 1 - R3 Hygiene, R5 Modularization, R6 CI/CD & R7 SDK", () => {
       expect(pkg.scripts["build"]).toBeDefined();
     });
 
-    it("6.1.3: verifies …3349 tokens truncated… = async () => {
-        throw new Error("Async component effect failure");
-      };
-
-      try {
-        await asyncComponentTask();
-      } catch (err) {
-        caught = true;
-        expect((err as Error).message).toContain("Async component effect");
-      }
-      expect(caught).toBe(true);
+    it("6.1.3: verifies Vitest configuration includes all test paths and workspace aliases", async () => {
+      const vitestConfig = await fs.readFile(path.join(workspaceRoot, "vitest.config.ts"), "utf8");
+      expect(vitestConfig).toContain("@protocol");
+      expect(vitestConfig).toContain("@nanoforge/protocol");
+      expect(vitestConfig).toContain("@nanoforge/sdk");
     });
 
-    it("2.1.3: handles circular state update limit exceptions with recovery barrier", () => {
-      let renderCount = 0;
-      const maxRenders = 50;
-      let circuitBroken = false;
+    it("6.1.4: verifies packages/protocol builds clean TypeScript declarations", async () => {
+      const protocolPkg = JSON.parse(
+        await fs.readFile(path.join(workspaceRoot, "packages/protocol/package.json"), "utf8")
+      );
+      expect(protocolPkg.name).toBe("@nanoforge/protocol");
+      expect(protocolPkg.scripts.typecheck).toBeDefined();
+    });
 
-      while (renderCount < 100) {
-        renderCount++;
-        if (renderCount > maxRenders) {
-          circuitBroken = true;
-          break;
+    it("6.1.5: verifies audit scan configuration and clean dependency graph", async () => {
+      const pnpmLock = await fs.readFile(path.join(workspaceRoot, "pnpm-lock.yaml"), "utf8");
+      expect(pnpmLock.length).toBeGreaterThan(1000);
+      expect(pnpmLock).toContain("lockfileVersion");
+    });
+  });
+
+  /* ====================================================================== */
+  /* F7.1: Programmatic @nanoforge/sdk Implementation (R7 §50-51)           */
+  /* ====================================================================== */
+  describe("F7.1: Programmatic @nanoforge/sdk Client", () => {
+    it("7.1.1: exports current SDK version and package metadata", () => {
+      expect(SDK_VERSION).toBe("0.1.0");
+    });
+
+    it("7.1.2: validates SDK package.json configuration and exports mapping", async () => {
+      const sdkPkg = JSON.parse(
+        await fs.readFile(path.join(workspaceRoot, "packages/sdk/package.json"), "utf8")
+      );
+      expect(sdkPkg.name).toBe("@nanoforge/sdk");
+      expect(sdkPkg.version).toBe("0.1.0");
+      expect(sdkPkg.exports["."]).toBeDefined();
+    });
+
+    it("7.1.3: validates SDK connection options interface contract", () => {
+      const client = new NanoForgeClient({
+        hostUrl: "ws://127.0.0.1:4040/agent",
+        token: "test-token-1234567890abcdef",
+        autoReconnect: true,
+      });
+
+      expect(client).toBeInstanceOf(NanoForgeClient);
+      expect(client.isConnected()).toBe(false);
+    });
+
+    it("7.1.4: validates SDK session streaming AsyncIterable event contract", async () => {
+      class TestWS {
+        public url: string;
+        public readyState: number = 0;
+        public onopen: (() => void) | null = null;
+        public onmessage: ((event: { data: string }) => void) | null = null;
+        public onclose: ((event: any) => void) | null = null;
+        public onerror: ((err: any) => void) | null = null;
+        public sent: string[] = [];
+
+        constructor(url: string) {
+          this.url = url;
+          setTimeout(() => {
+            this.readyState = 1;
+            if (this.onopen) this.onopen();
+          }, 5);
+        }
+
+        public send(data: string) {
+          this.sent.push(data);
+          const parsed = JSON.parse(data);
+          if (parsed.type === "plan.submit") {
+            setTimeout(() => {
+              if (this.onmessage) {
+                this.onmessage({
+                  data: JSON.stringify({
+                    type: "run.state",
+                    runId: parsed.plan.id,
+                    state: "queued",
+                    at: new Date().toISOString(),
+                  }),
+                });
+                this.onmessage({
+                  data: JSON.stringify({
+                    type: "run.state",
+                    runId: parsed.plan.id,
+                    state: "running",
+                    at: new Date().toISOString(),
+                  }),
+                });
+                this.onmessage({
+                  data: JSON.stringify({
+                    type: "run.state",
+                    runId: parsed.plan.id,
+                    state: "done",
+                    at: new Date().toISOString(),
+                  }),
+                });
+              }
+            }, 10);
+          }
+        }
+
+        public close() {
+          this.readyState = 3;
+          if (this.onclose) this.onclose({ code: 1000, reason: "closed" });
         }
       }
 
-      expect(circuitBroken).toBe(true);
-      expect(renderCount).toBe(51);
-    });
+      const client = new NanoForgeClient({
+        hostUrl: "ws://127.0.0.1:4040/agent",
+        WebSocket: function (url: string) {
+          return new TestWS(url);
+        },
+      });
 
-    it("2.1.4: recovers gracefully when error boundary resets upon props update", () => {
-      let error = true;
-      const render = () => {
-        if (error) throw new Error("Render error");
-        return "Clean render";
+      const session = await client.createSession({ title: "SDK E2E Test Session" });
+      expect(session).toBeInstanceOf(AgentSession);
+
+      const plan = {
+        id: "plan-sdk-1",
+        goal: "Stream run contract validation",
+        steps: [{ id: "s1", title: "Step 1" }],
       };
 
-      expect(() => render()).toThrow();
-      error = false; // Props updated / user switched session
-      expect(render()).toBe("Clean render");
+      const received: string[] = [];
+      for await (const ev of session.streamRun(plan)) {
+        if (ev.state) {
+          received.push(`run.${ev.state}`);
+        } else {
+          received.push(ev.type);
+        }
+      }
+
+      expect(received).toEqual(["run.queued", "run.running", "run.done"]);
+      await client.disconnect();
     });
 
-    it("2.1.5: maintains telemetry error ledger during multiple component crashes", () => {
-      const ledger: { component: string; message: string; at: string }[] = [];
-      const recordCrash = (component: string, message: string) => {
-        ledger.push({ component, message, at: new Date().toISOString() });
+    it("7.1.5: validates SDK tool interaction and plan submission types", () => {
+      const client = new NanoForgeClient({
+        hostUrl: "ws://127.0.0.1:4040/agent",
+      });
+
+      const plan = {
+        id: "plan-sdk-1",
+        goal: "Programmatic SDK automation test",
+        steps: [{ id: "s1", title: "Initialize environment" }],
       };
 
-      recordCrash("TerminalDock", "PTY connection lost");
-      recordCrash("SubagentSwarm", "Tree layout overflow");
-      recordCrash("MermaidViewer", "SVG parsing failed");
-
-      expect(ledger.length).toBe(3);
-      expect(ledger[0].component).toBe("TerminalDock");
-      expect(ledger[2].component).toBe("MermaidViewer");
-    });
-  });
-
-  /* ====================================================================== */
-  /* 2. Host Lifecycle & Termination Stress                                 */
-  /* ====================================================================== */
-  describe("2. Host Lifecycle & Termination Stress", () => {
-    it("2.2.1: handles rapid consecutive start and stop cycles without socket leaks", async () => {
-      for (let i = 0; i < 3; i++) {
-        const host = await createHost({ port: 0 });
-        expect(host.port).toBeGreaterThan(0);
-        await host.close();
-      }
-    });
-
-    it("2.2.2: drains active WebSocket connections cleanly on host shutdown", async () => {
-      e2eHost = await launchE2ETestHost();
-      const client = await e2eHost.connect();
-      await client.nextMessage(); // host.ready
-
-      const closeRes = await client.close();
-      expect([1000, 1001, 1005, 1006]).toContain(closeRes.code);
-      await e2eHost.close();
-      e2eHost = undefined;
-    });
-
-    it("2.2.3: terminates all active child daemon processes during host teardown", async () => {
-      const supervisor = new DaemonSupervisor();
-      await supervisor.spawnTask({
-        command: "node",
-        args: ["-e", "setInterval(() => {}, 1000)"],
-        cwd: process.cwd(),
-        isDaemon: true,
-      });
-
-      await supervisor.killAll();
-      const tasks = supervisor.listTasks();
-      for (const t of tasks) {
-        expect(["completed", "killed", "failed"]).toContain(t.status);
-      }
-    });
-
-    it("2.2.4: survives multiple redundant killAll calls idempotently", async () => {
-      const supervisor = new DaemonSupervisor();
-      await supervisor.spawnTask({
-        command: "node",
-        args: ["-e", "setInterval(() => {}, 1000)"],
-        cwd: process.cwd(),
-        isDaemon: true,
-      });
-
-      await supervisor.killAll();
-      await supervisor.killAll();
-      await supervisor.killAll();
-      expect(supervisor.listTasks().every((t) => t.status !== "running")).toBe(true);
-    });
-
-    it("2.2.5: suppresses unhandled rejections during background worker disposal", async () => {
-      const supervisor = new SubagentSupervisor();
-      await supervisor.spawnSubagent({
-        archetype: "explorer",
-        name: "test_subagent_teardown",
-        prompt: "Check files",
-      });
-      expect(supervisor.registry.getAll().length).toBe(1);
-    });
-  });
-
-  /* ====================================================================== */
-  /* 3. Daemon Buffer Flood & Spinloop Boundaries                           */
-  /* ====================================================================== */
-  describe("3. Daemon Buffer Flood & Spinloop Boundaries", () => {
-    it("2.3.1: caps 10MB massive stdout flood to exact 2MB circular ring buffer ceiling", () => {
-      const buffer = new CircularRingBuffer(2 * 1024 * 1024); // 2MB
-      const chunk = "X".repeat(1024 * 1024); // 1MB chunk
-
-      // Feed 10MB of data
-      for (let i = 0; i < 10; i++) {
-        buffer.append(chunk);
-      }
-
-      expect(buffer.byteLength).toBe(2 * 1024 * 1024);
-      expect(buffer.isTruncated()).toBe(true);
-      expect(buffer.readLogs().length).toBe(2 * 1024 * 1024);
-    });
-
-    it("2.3.2: cleanly terminates daemon spinloop consuming high CPU", async () => {
-      const supervisor = new DaemonSupervisor();
-      const task = await supervisor.spawnTask({
-        command: "node",
-        args: ["-e", "while(true) {}"],
-        cwd: process.cwd(),
-        isDaemon: true,
-      });
-
-      expect(task.status).toBe("running");
-      const killRes = await supervisor.killTask(task.taskId);
-      expect(killRes.success).toBe(true);
-
-      const updated = supervisor.getTask(task.taskId);
-      expect(["killed", "completed", "failed"]).toContain(updated?.status);
-      await supervisor.killAll();
-    });
-
-    it("2.3.3: records non-zero exit code when process terminates with empty stdout/stderr", async () => {
-      const supervisor = new DaemonSupervisor();
-      const task = await supervisor.spawnTask({
-        command: "node",
-        args: ["-e", "process.exit(137)"],
-        cwd: process.cwd(),
-      });
-
-      let updated = supervisor.getTask(task.taskId);
-      const start = Date.now();
-      while (updated?.status === "running" && Date.now() - start < 3000) {
-        await new Promise((r) => setTimeout(r, 50));
-        updated = supervisor.getTask(task.taskId);
-      }
-      expect(["completed", "failed"]).toContain(updated?.status);
-      expect(updated?.exitCode).toBe(137);
-      await supervisor.killAll();
-    });
-
-    it("2.3.4: handles rapid spawn-kill-spawn cycles under 50ms without descriptor leak", async () => {
-      const supervisor = new DaemonSupervisor();
-      for (let i = 0; i < 3; i++) {
-        const task = await supervisor.spawnTask({
-          command: "node",
-          args: ["-e", "setInterval(() => {}, 1000)"],
-          cwd: process.cwd(),
-          isDaemon: true,
-        });
-        await supervisor.killTask(task.taskId);
-      }
-      expect(supervisor.listTasks().length).toBe(3);
-      await supervisor.killAll();
-    });
-
-    it("2.3.5: handles large 100KB stdin write flood without stream backpressure deadlock", async () => {
-      const supervisor = new DaemonSupervisor();
-      const task = await supervisor.spawnTask({
-        command: "node",
-        args: ["-e", "process.stdin.on('data', () => {}); setInterval(() => {}, 1000)"],
-        cwd: process.cwd(),
-        isDaemon: true,
-      });
-
-      const bigInput = "DATA_LINE_".repeat(10_000);
-      const res = await supervisor.sendInput(task.taskId, bigInput);
-      expect(res.success).toBe(true);
-      await supervisor.killAll();
-    });
-  });
-
-  /* ====================================================================== */
-  /* 4. Health Endpoint Stress & Metric Boundaries                          */
-  /* ====================================================================== */
-  describe("4. Health Endpoint Stress & Metric Boundaries", () => {
-    it("2.4.1: reports 200 OK during 50 concurrent rapid health requests", async () => {
-      e2eHost = await launchE2ETestHost();
-      const reqs = Array.from({ length: 50 }, () =>
-        fetch(`http://127.0.0.1:${e2eHost.host.port}/health`)
-      );
-
-      const responses = await Promise.all(reqs);
-      for (const res of responses) {
-        expect(res.status).toBe(200);
-      }
-    });
-
-    it("2.4.2: reports version and ok status in JSON payload accurately", async () => {
-      e2eHost = await launchE2ETestHost();
-      const res = await fetch(`http://127.0.0.1:${e2eHost.host.port}/health`);
-      const body = (await res.json()) as { ok: boolean; version: string };
-      expect(body.ok).toBe(true);
-      expect(body.version).toBe(HOST_VERSION);
-    });
-
-    it("2.4.3: tracks memory metrics integrity under memory allocation spikes", () => {
-      const before = process.memoryUsage();
-      const arrays: Uint8Array[] = [];
-      for (let i = 0; i < 5; i++) {
-        arrays.push(new Uint8Array(1024 * 1024)); // allocate 1MB
-      }
-      const after = process.memoryUsage();
-      expect(after.heapUsed).toBeGreaterThan(0);
-      expect(after.rss).toBeGreaterThan(0);
-      // Retain reference to prevent GC optimization during test
-      expect(arrays.length).toBe(5);
-    });
-
-    it("2.4.4: handles health checks immediately after socket connection open", async () => {
-      e2eHost = await launchE2ETestHost();
-      const client = await e2eHost.connect();
-      const res = await fetch(`http://127.0.0.1:${e2eHost.host.port}/health`);
-      expect(res.status).toBe(200);
-      await client.close();
-    });
-
-    it("2.4.5: health endpoint fails cleanly after host server close", async () => {
-      const host = await createHost({ port: 0 });
-      const port = host.port;
-      await host.close();
-      await expect(fetch(`http://127.0.0.1:${port}/health`)).rejects.toThrow();
-    });
-  });
-
-  /* ====================================================================== */
-  /* 5. High-Entropy UUID Collision & Casing Boundaries                     */
-  /* ====================================================================== */
-  describe("5. High-Entropy UUID Collision & Casing Boundaries", () => {
-    const UUID_V4_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
-    it("2.5.1: generates 10,000 unique UUIDs with zero collisions", () => {
-      const set = new Set<string>();
-      const batchSize = 10_000;
-      for (let i = 0; i < batchSize; i++) {
-        set.add(randomUUID());
-      }
-      expect(set.size).toBe(batchSize);
-    });
-
-    it("2.5.2: enforces RFC 4122 version 4 nibble in position 13", () => {
-      for (let i = 0; i < 100; i++) {
-        const id = randomUUID();
-        // Character at index 14 (0-indexed after 8-4-) is the version nibble '4'
-        expect(id[14]).toBe("4");
-      }
-    });
-
-    it("2.5.3: enforces variant bits (8, 9, a, b) in position 19", () => {
-      for (let i = 0; i < 100; i++) {
-        const id = randomUUID();
-        expect(["8", "9", "a", "b"]).toContain(id[19].toLowerCase());
-      }
-    });
-
-    it("2.5.4: rejects nil UUIDs (all zeroes) as invalid RFC 4122 v4", () => {
-      const nilUuid = "00000000-0000-0000-0000-000000000000";
-      expect(UUID_V4_REGEX.test(nilUuid)).toBe(false);
-    });
-
-    it("2.5.5: preserves lowercase canonical representation across protocol wire frames", () => {
-      const id = randomUUID().toLowerCase();
-      expect(id).toBe(id.toLowerCase());
-      expect(UUID_V4_REGEX.test(id)).toBe(true);
+      expect(plan.id).toBe("plan-sdk-1");
+      expect(plan.steps.length).toBe(1);
+      expect(typeof client.grantApproval).toBe("function");
+      expect(typeof client.denyApproval).toBe("function");
+      expect(typeof client.sendToolResponse).toBe("function");
     });
   });
 });

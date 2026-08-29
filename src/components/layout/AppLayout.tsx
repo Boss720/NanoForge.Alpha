@@ -277,115 +277,721 @@ export function AppLayout({
   const activeWorkspace = workspaces.find((workspace) => workspace.id === activeWorkspaceId);
   const persistedHostWorkspace = activeWorkspace?.location?.status === "ready";
   const hasHostWorkspace =
-    (host.status …16892 tokens truncated…tton]:rounded-l-md"
-            : "[&:first-child[data-selected=true]_button]:rounded-l-md",
-          defaultClassNames.day
-        ),
-        range_start: cn(
-          "rounded-l-md bg-accent",
-          defaultClassNames.range_start
-        ),
-        range_middle: cn("rounded-none", defaultClassNames.range_middle),
-        range_end: cn("rounded-r-md bg-accent", defaultClassNames.range_end),
-        today: cn(
-          "bg-accent text-accent-foreground rounded-md data-[selected=true]:rounded-none",
-          defaultClassNames.today
-        ),
-        outside: cn(
-          "text-muted-foreground aria-selected:text-muted-foreground",
-          defaultClassNames.outside
-        ),
-        disabled: cn(
-          "text-muted-foreground opacity-50",
-          defaultClassNames.disabled
-        ),
-        hidden: cn("invisible", defaultClassNames.hidden),
-        ...classNames,
-      }}
-      components={{
-        Root: ({ className, rootRef, ...props }) => {
-          return (
-            <div
-              data-slot="calendar"
-              ref={rootRef}
-              className={cn(className)}
-              {...props}
-            />
-          )
-        },
-        Chevron: ({ className, orientation, ...props }) => {
-          if (orientation === "left") {
-            return (
-              <ChevronLeftIcon className={cn("size-4", className)} {...props} />
-            )
-          }
+    (host.status === "connected" || host.runtimeState === "ready" || host.runtimeState === "healthy") &&
+    (persistedHostWorkspace || openedWorkspace !== null);
+  const runtimeStatus: RuntimeStatus = host.status === "off" || (host.runtimeState === "unavailable" && !host.enabled)
+    ? "offline"
+    : host.runtimeState === "reconnecting"
+      ? "reconnecting"
+      : host.runtimeState === "switching"
+        ? "switching"
+        : host.runtimeState === "starting" || host.status === "connecting"
+          ? "connecting"
+          : host.runtimeState === "needs_attention"
+            ? "needs_attention"
+            : host.status === "error" || host.runtimeState === "unavailable"
+              ? "error"
+              : hasHostWorkspace
+                ? "ready"
+                : activeWorkspace?.location
+                  ? "unavailable"
+                  : "no-workspace";
+  const workspaceClient = useMemo(() => hasHostWorkspace ? {
+    readDir: async (path = "") => {
+      const result = await host.readWorkspaceDirectory(path);
+      if (!result) throw new Error(host.lastError ?? "Unable to read local workspace");
+      return result;
+    },
+    readFile: async (path: string) => {
+      const result = await host.readWorkspaceFile(path);
+      if (!result) throw new Error(host.lastError ?? "Unable to read local file");
+      return result;
+    },
+    search: async (query: string, options?: { maxResults?: number }) => {
+      const result = await host.searchWorkspace(query, options);
+      if (!result) throw new Error(host.lastError ?? "Unable to search local workspace");
+      return result;
+    },
+    gitStatus: async () => (await host.workspaceGitStatus()) ?? [],
+  } : undefined, [hasHostWorkspace, host]);
+  const workspaceExplorer = useWorkspace(workspaceClient);
+  const { refreshTree, refreshGitStatus } = workspaceExplorer;
 
-          if (orientation === "right") {
-            return (
-              <ChevronRightIcon
-                className={cn("size-4", className)}
-                {...props}
-              />
-            )
-          }
+  useEffect(() => {
+    if (!hasHostWorkspace) return;
+    void refreshTree();
+    void refreshGitStatus();
+    void host.watchWorkspace();
+    return () => { void host.unwatchWorkspace(); };
+  }, [hasHostWorkspace, host, refreshGitStatus, refreshTree]);
 
-          return (
-            <ChevronDownIcon className={cn("size-4", className)} {...props} />
-          )
-        },
-        DayButton: CalendarDayButton,
-        WeekNumber: ({ children, ...props }) => {
-          return (
-            <td {...props}>
-              <div className="flex size-(--cell-size) items-center justify-center text-center">
-                {children}
-              </div>
-            </td>
-          )
-        },
-        ...components,
-      }}
-      {...props}
-    />
-  )
-}
+  const openFolder = useCallback(async () => {
+    if (running || host.subagents.some((agent) => agent.state === "running")) {
+      const approved = window.confirm("Opening another folder interrupts active local work. Continue?");
+      if (!approved) return;
+    }
+    if (!workspaceBroker.available) {
+      setWorkspaceRecovery({ status: "unsupported", message: "Local folder selection is available only from the NanoForge launcher." });
+      return;
+    }
+    setWorkspaceRecovery({ status: "connecting", message: "Waiting for the native folder picker…" });
+    const selection = await workspaceBroker.choose();
+    if (!selection) {
+      setWorkspaceRecovery({ status: "ready" });
+      return;
+    }
+    setWorkspaceRecovery({ status: "connecting", message: "Starting the selected local workspace…" });
+    const result = await workspaceBroker.activate(selection.workspace.workspaceId);
+    if (!result) {
+      setWorkspaceRecovery({ status: "unavailable", message: "The selected folder could not be opened. Your current workspace is unchanged." });
+      return;
+    }
+    const location: WorkspaceLocation = {
+      kind: "local",
+      hostWorkspaceId: result.workspace.workspaceId,
+      displayPath: result.workspace.label,
+      lastOpenedAt: Date.now(),
+      status: "ready",
+    };
+    if (result.connection) {
+      setWorkspaceRecovery({ status: "connecting", message: "Connecting the selected local workspace…" });
+      const descriptor = await host.reconnectToWorkspace(result.connection);
+      if (!descriptor) {
+        setWorkspaceRecovery({ status: "unavailable", message: host.lastError ?? "The selected folder could not be connected. Your previous local host remains active." });
+        return;
+      }
+      setOpenedWorkspace(descriptor);
+      onConnectionMetadata?.(result.connection);
+      const existing = workspaces.find((workspace) => workspace.location?.hostWorkspaceId === location.hostWorkspaceId);
+      const appWorkspaceId = existing?.id ?? onCreateWorkspace(result.workspace.label, location);
+      if (appWorkspaceId) {
+        onUpdateWorkspaceLocation?.(appWorkspaceId, location);
+        onSelectWorkspace(appWorkspaceId);
+      }
+      setWorkspaceRecovery({ status: "ready" });
+      return;
+    }
+    const appWorkspaceId = onCreateWorkspace(result.workspace.label, { ...location, status: "unavailable" });
+    setWorkspaceRecovery({ status: "unavailable", message: "Folder selected, but this session cannot connect a local host. Your current workspace is unchanged." });
+    if (appWorkspaceId) onUpdateWorkspaceLocation?.(appWorkspaceId, { ...location, status: "unavailable" });
+  }, [host, onConnectionMetadata, onCreateWorkspace, onSelectWorkspace, onUpdateWorkspaceLocation, running, workspaceBroker, workspaces]);
 
-function CalendarDayButton({
-  className,
-  day,
-  modifiers,
-  ...props
-}: React.ComponentProps<typeof DayButton>) {
-  const defaultClassNames = getDefaultClassNames()
+  const reconnectWorkspace = useCallback(() => {
+    if (activeWorkspace?.location) setWorkspaceRecovery({ status: "unavailable", message: "Reconnect the local host, then reopen this folder from Recent folders." });
+    else void openFolder();
+  }, [activeWorkspace?.location, openFolder]);
 
-  const ref = React.useRef<HTMLButtonElement>(null)
-  React.useEffect(() => {
-    if (modifiers.focused) ref.current?.focus()
-  }, [modifiers.focused])
+  const openRecentWorkspace = useCallback(async (workspaceId: string) => {
+    if (!workspaceBroker.available) {
+      setWorkspaceRecovery({ status: "unsupported", message: "Recent local folders can only be opened from the NanoForge launcher." });
+      return;
+    }
+    setWorkspaceRecovery({ status: "connecting", message: "Opening local folder…" });
+    const result = await workspaceBroker.activate(workspaceId);
+    if (!result) {
+      setWorkspaceRecovery({ status: "unavailable", message: "The selected recent folder could not be opened." });
+      return;
+    }
+    const location: WorkspaceLocation = {
+      kind: "local",
+      hostWorkspaceId: result.workspace.workspaceId,
+      displayPath: result.workspace.label,
+      lastOpenedAt: Date.now(),
+      status: "ready",
+    };
+    if (result.connection) {
+      setWorkspaceRecovery({ status: "connecting", message: "Connecting the selected local workspace…" });
+      const descriptor = await host.reconnectToWorkspace(result.connection);
+      if (!descriptor) {
+        setWorkspaceRecovery({ status: "unavailable", message: host.lastError ?? "The selected folder could not be connected. Your previous local host remains active." });
+        return;
+      }
+      setOpenedWorkspace(descriptor);
+      onConnectionMetadata?.(result.connection);
+      const existing = workspaces.find((candidate) => candidate.location?.hostWorkspaceId === workspaceId);
+      const appWorkspaceId = existing?.id ?? onCreateWorkspace(result.workspace.label, location);
+      if (appWorkspaceId) {
+        onUpdateWorkspaceLocation?.(appWorkspaceId, location);
+        onSelectWorkspace(appWorkspaceId);
+      }
+      setWorkspaceRecovery({ status: "ready" });
+      return;
+    }
+    const appWorkspaceId = onCreateWorkspace(result.workspace.label, { ...location, status: "unavailable" });
+    setWorkspaceRecovery({ status: "unavailable", message: "This folder is available in Recents, but this session cannot connect a local host. Your current workspace is unchanged." });
+    if (appWorkspaceId) onUpdateWorkspaceLocation?.(appWorkspaceId, { ...location, status: "unavailable" });
+  }, [host, onConnectionMetadata, onCreateWorkspace, onSelectWorkspace, onUpdateWorkspaceLocation, workspaceBroker, workspaces]);
+
+  const revealWorkspacePath = useCallback(async (path: string) => {
+    const workspaceId = activeWorkspace?.location?.hostWorkspaceId;
+    if (!workspaceId || !workspaceBroker.available) return false;
+    try {
+      await workspaceBroker.reveal(workspaceId, path);
+      return true;
+    } catch {
+      setWorkspaceRecovery({ status: "unavailable", message: "The launcher could not reveal that path." });
+      return false;
+    }
+  }, [activeWorkspace?.location?.hostWorkspaceId, workspaceBroker]);
+
+  const openWorkspaceFile = useCallback(async (path: string) => {
+    const file = await host.readWorkspaceFile(path);
+    if (!file) {
+      setWorkspaceRecovery({ status: "unavailable", message: host.lastError ?? `Could not read ${path}.` });
+      return;
+    }
+    setRemoteViewer(file);
+  }, [host]);
+
+  const attachWorkspaceFile = useCallback((path: string) => {
+    setWorkspaceAttachmentRequest(path);
+    onAttachWorkspaceFile?.(path);
+    if (!onAttachWorkspaceFile) setWorkspaceRecovery({ status: "ready", message: `${path} is ready for the attachment pipeline.` });
+  }, [onAttachWorkspaceFile]);
+
+  const workspaceFiles = hasHostWorkspace ? flattenWorkspaceFiles(workspaceExplorer.tree) : files;
+  const resolveWorkspaceAttachment = hasHostWorkspace
+    ? async (path: string) => {
+        const result = await host.readWorkspaceFile(path);
+        if (!result) throw new Error(host.lastError ?? `Could not read ${path}.`);
+        return {
+          content: result.content,
+          language: result.language,
+          byteSize: result.size,
+          mimeType: "text/plain",
+        };
+      }
+    : undefined;
+
+  useEffect(() => {
+    if (!isNarrow) {
+      setSidebarOpen(false);
+      setModelsOpen(false);
+    }
+  }, [isNarrow]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setSwitcherOpen((o) => !o);
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "o") {
+        e.preventDefault();
+        void openFolder();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [openFolder]);
+
+  useEffect(() => {
+    if (switcherOpen) setSwitcherQuery("");
+  }, [switcherOpen]);
+
+  const activeViewer = useMemo(
+    () => files.find((f) => f.path === viewerFile),
+    [files, viewerFile],
+  );
+  const displayedViewer = remoteViewer ?? activeViewer;
+  const effectiveRecovery = host.status === "off" && activeWorkspace?.location
+    ? { status: "unavailable" as const, message: "Local host is offline. Reconnect to reopen this folder." }
+    : workspaceRecovery;
+
+  const explorerNode = hasHostWorkspace ? <WorkspaceExplorer
+    className="h-full w-full border-0 bg-transparent"
+    tree={workspaceExplorer.tree}
+    activeFile={workspaceExplorer.activeFile}
+    onFileSelect={openWorkspaceFile}
+    onRevealPath={workspaceBroker.available && activeWorkspace?.location?.status === "ready" ? revealWorkspacePath : undefined}
+    onRefresh={() => { void workspaceExplorer.refreshTree(); void workspaceExplorer.refreshGitStatus(); }}
+    onSearch={(query) => { void workspaceExplorer.searchFiles(query); }}
+    onLoadDirectory={workspaceExplorer.loadDirectory}
+    onAttachToChat={attachWorkspaceFile}
+    searchResults={workspaceExplorer.searchResults}
+    error={workspaceExplorer.error}
+    isConnected={host.status === "connected"}
+  /> : undefined;
+
+  const switcher = useMemo(() => {
+    const q = switcherQuery.trim().toLowerCase();
+    if (!q) {
+      return {
+        items: models.slice(0, MAX_SWITCHER_ITEMS),
+        total: models.length,
+        truncated: models.length > MAX_SWITCHER_ITEMS,
+      };
+    }
+    const rank = (m: Model) => {
+      const name = m.name.toLowerCase();
+      const id = m.id.toLowerCase();
+      if (name.startsWith(q)) return 0;
+      if (id.startsWith(q)) return 1;
+      return 2;
+    };
+    const matches = models
+      .filter((m) => `${m.name} ${m.id}`.toLowerCase().includes(q))
+      .sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
+    return {
+      items: matches.slice(0, MAX_SWITCHER_ITEMS),
+      total: matches.length,
+      truncated: matches.length > MAX_SWITCHER_ITEMS,
+    };
+  }, [models, switcherQuery]);
+
+  const switcherProviders = useMemo(
+    () => Array.from(new Set(switcher.items.map((m) => m.provider))).sort(),
+    [switcher.items],
+  );
+
+  const onConnectSubmit = useCallback(
+    async (apiKey: string, baseUrl: string) => {
+      await handleConnect(apiKey, baseUrl);
+      setSettingsOpen(false);
+    },
+    [handleConnect],
+  );
 
   return (
-    <Button
-      ref={ref}
-      variant="ghost"
-      size="icon"
-      data-day={day.date.toLocaleDateString()}
-      data-selected-single={
-        modifiers.selected &&
-        !modifiers.range_start &&
-        !modifiers.range_end &&
-        !modifiers.range_middle
-      }
-      data-range-start={modifiers.range_start}
-      data-range-end={modifiers.range_end}
-      data-range-middle={modifiers.range_middle}
-      className={cn(
-        "data-[selected-single=true]:bg-primary data-[selected-single=true]:text-primary-foreground data-[range-middle=true]:bg-accent data-[range-middle=true]:text-accent-foreground data-[range-start=true]:bg-primary data-[range-start=true]:text-primary-foreground data-[range-end=true]:bg-primary data-[range-end=true]:text-primary-foreground group-data-[focused=true]/day:border-ring group-data-[focused=true]/day:ring-ring/50 dark:hover:text-accent-foreground flex aspect-square size-auto w-full min-w-(--cell-size) flex-col gap-1 leading-none font-normal group-data-[focused=true]/day:relative group-data-[focused=true]/day:z-10 group-data-[focused=true]/day:ring-[3px] data-[range-end=true]:rounded-md data-[range-end=true]:rounded-r-md data-[range-middle=true]:rounded-none data-[range-start=true]:rounded-md data-[range-start=true]:rounded-l-md [&>span]:text-xs [&>span]:opacity-70",
-        defaultClassNames.day,
-        className
-      )}
-      {...props}
-    />
-  )
-}
+    <div className="flex h-screen flex-col overflow-hidden bg-background">
+      <ErrorBoundary panelName="Top Bar">
+        <TopBar
+          connection={connection}
+          usage={usage}
+          onOpenSettings={() => setSettingsOpen(true)}
+          onOpenSidebar={() => setSidebarOpen(true)}
+          onOpenModels={() => setModelsOpen(true)}
+          onExport={handleExport}
+          canExport={!!session && session.messages.length > 0}
+          onOpenCosts={() => setCostsOpen(true)}
+          onOpenImages={() => setImagesOpen(true)}
+          onOpenArtifacts={artifactsManager.toggleDock}
+          artifactCount={artifactsManager.artifacts.length}
+          onOpenSubagents={() => setSubagentsOpen((o) => !o)}
+          subagentCount={
+            host.subagents.filter((a) => a.state === "running").length || host.subagents.length
+          }
+          onOpenTheme={() => setThemeOpen(true)}
+          runtimeStatus={runtimeStatus}
+        />
+      </ErrorBoundary>
 
-export { Calendar, CalendarDayButton }
+      <div className="flex min-h-0 flex-1">
+        {/* Sidebar dock for desktop (lg and up) */}
+        <ErrorBoundary panelName="Sidebar Navigation" className="hidden lg:flex">
+          <Sidebar
+            className="hidden lg:flex"
+            workspaces={workspaces}
+            activeWorkspaceId={activeWorkspaceId}
+            activeChatId={activeChatId}
+            onSelectWorkspace={onSelectWorkspace}
+            onCreateWorkspace={onCreateWorkspace}
+            onOpenFolder={() => { void openFolder(); }}
+            onReconnectWorkspace={reconnectWorkspace}
+            onOpenRecentWorkspace={openRecentWorkspace}
+            recents={workspaceBroker.recents}
+            workspaceRecovery={effectiveRecovery}
+            onRenameWorkspace={onRenameWorkspace}
+            onPinWorkspace={onPinWorkspace}
+            onArchiveWorkspace={onArchiveWorkspace}
+            onDuplicateWorkspace={onDuplicateWorkspace}
+            onDeleteWorkspace={onDeleteWorkspace}
+            onSelectChat={onSelectChat}
+            onCreateChat={() => onCreateChat(selectedModel)}
+            onRenameChat={onRenameChat}
+            onPinChat={onPinChat}
+            onArchiveChat={onArchiveChat}
+            onDuplicateChat={onDuplicateChat}
+            onDeleteChat={onDeleteChat}
+            files={files}
+            activeFile={viewerFile ?? ""}
+            onFileSelect={(p) => setViewerFile(p)}
+            workspaceExplorer={explorerNode}
+          />
+        </ErrorBoundary>
+
+        {/* Central Chat Panel */}
+        <ErrorBoundary panelName="Chat Transcript" className="flex-1">
+          <ChatPanel
+            messages={session?.messages ?? []}
+            running={running}
+            model={model}
+            connected={connected}
+            onSend={handleSend}
+            onStop={handleStop}
+            onPatchDecision={handlePatchDecision}
+            genPrefs={genPrefs}
+            onGenPrefsChange={handleGenPrefsChange}
+            onOpenFolder={() => { void openFolder(); }}
+            toolRuns={host.toolRuns}
+            onToolStop={host.stopToolRun}
+            onExecuteCommand={handleSwarmCommand}
+            workspaceFiles={workspaceFiles}
+            resolveWorkspaceAttachment={resolveWorkspaceAttachment}
+            workspaceAttachmentRequest={workspaceAttachmentRequest}
+            onWorkspaceAttachmentConsumed={() => setWorkspaceAttachmentRequest(null)}
+          />
+        </ErrorBoundary>
+
+        {/* Artifact Viewer Dock */}
+        {artifactsManager.isOpen && artifactsManager.artifacts.length > 0 && (
+          <aside
+            data-testid="artifact-rail"
+            className="hidden min-h-0 w-[440px] shrink-0 flex-col lg:flex"
+          >
+            <ErrorBoundary panelName="Artifact Viewer">
+              <ArtifactDock
+                artifacts={artifactsManager.artifacts}
+                activeArtifactId={artifactsManager.activeArtifactId}
+                onSelectArtifact={artifactsManager.selectArtifact}
+                onClose={artifactsManager.closeDock}
+                onSendFeedback={artifactsManager.handleFeedback}
+              />
+            </ErrorBoundary>
+          </aside>
+        )}
+
+        {/* Subagents Swarm Control Plane Dock */}
+        {subagentsOpen && (
+          <aside
+            data-testid="subagents-rail"
+            className="hidden min-h-0 w-[480px] shrink-0 flex-col lg:flex"
+          >
+            <ErrorBoundary panelName="Subagent Swarm Control Plane">
+              <Suspense fallback={<DockSkeleton label="Loading Subagents Swarm Control Plane..." />}>
+                <SubagentsPanel
+                  session={host}
+                  onClose={() => setSubagentsOpen(false)}
+                  onSelectArtifact={(p) => setViewerFile(p)}
+                />
+              </Suspense>
+            </ErrorBoundary>
+          </aside>
+        )}
+
+        {/* Plan Inspector Side Rail (mounted when plan or evidence exists) */}
+        {(host.plan || host.evidence) && (
+          <aside data-testid="plan-rail" className="hidden min-h-0 w-80 shrink-0 flex-col lg:flex">
+            {host.plan && (
+              <ErrorBoundary panelName="Plan Inspector">
+                <PlanPanel
+                  plan={host.plan}
+                  className="min-h-0 flex-1"
+                  onApproveStep={host.approveStep}
+                  onRunApproved={host.runApproved}
+                  onPause={host.pause}
+                  onCancel={host.cancel}
+                />
+              </ErrorBoundary>
+            )}
+            {host.evidence && (
+              <ErrorBoundary panelName="Visual Evidence">
+                <div className="scrollbar-thin max-h-[45%] shrink-0 overflow-y-auto border-l border-t border-border bg-card/40 p-2">
+                  <VisualEvidenceCard
+                    assertions={host.evidence.assertions}
+                    diff={host.evidence.diff}
+                  />
+                </div>
+              </ErrorBoundary>
+            )}
+          </aside>
+        )}
+
+        {/* Model Selection Panel */}
+        <ErrorBoundary panelName="Model Selection" className="hidden lg:flex">
+          <ModelPanel
+            className="hidden lg:flex"
+            models={models}
+            selected={selectedModel}
+            onSelect={setSelectedModel}
+            live={connection.liveModels}
+            routeDecision={host.routeDecision ?? undefined}
+          />
+        </ErrorBoundary>
+      </div>
+
+      {/* Mobile Drawers (Sheet) */}
+      <Sheet open={sidebarOpen} onOpenChange={setSidebarOpen}>
+        <SheetContent side="left" className="gap-0 border-border bg-card p-0">
+          <SheetHeader className="sr-only">
+            <SheetTitle>Sessions &amp; workspace</SheetTitle>
+          </SheetHeader>
+          <ErrorBoundary panelName="Sidebar Navigation (Mobile)">
+            <Sidebar
+              className="h-full w-full border-r-0"
+              workspaces={workspaces}
+              activeWorkspaceId={activeWorkspaceId}
+              activeChatId={activeChatId}
+              onSelectWorkspace={(id) => {
+                onSelectWorkspace(id);
+                setSidebarOpen(false);
+              }}
+              onCreateWorkspace={(name) => {
+                onCreateWorkspace(name);
+                setSidebarOpen(false);
+              }}
+              onOpenFolder={() => { void openFolder(); }}
+              onReconnectWorkspace={reconnectWorkspace}
+              onOpenRecentWorkspace={(id) => { openRecentWorkspace(id); setSidebarOpen(false); }}
+              workspaceRecovery={effectiveRecovery}
+              onRenameWorkspace={onRenameWorkspace}
+              onPinWorkspace={onPinWorkspace}
+              onArchiveWorkspace={onArchiveWorkspace}
+              onDuplicateWorkspace={onDuplicateWorkspace}
+              onDeleteWorkspace={onDeleteWorkspace}
+              onSelectChat={(id) => {
+                onSelectChat(id);
+                setSidebarOpen(false);
+              }}
+              onCreateChat={() => {
+                onCreateChat(selectedModel);
+                setSidebarOpen(false);
+              }}
+              onRenameChat={onRenameChat}
+              onPinChat={onPinChat}
+              onArchiveChat={onArchiveChat}
+              onDuplicateChat={onDuplicateChat}
+              onDeleteChat={onDeleteChat}
+              files={files}
+              activeFile={viewerFile ?? ""}
+              onFileSelect={(p) => {
+                setViewerFile(p);
+                setSidebarOpen(false);
+              }}
+              workspaceExplorer={explorerNode}
+            />
+          </ErrorBoundary>
+        </SheetContent>
+      </Sheet>
+
+      <Sheet open={modelsOpen} onOpenChange={setModelsOpen}>
+        <SheetContent side="right" className="gap-0 border-border bg-card p-0">
+          <SheetHeader className="sr-only">
+            <SheetTitle>Model catalog</SheetTitle>
+          </SheetHeader>
+          <ErrorBoundary panelName="Model Catalog (Mobile)">
+            <ModelPanel
+              className="h-full w-full border-l-0"
+              models={models}
+              selected={selectedModel}
+              onSelect={(id) => {
+                setSelectedModel(id);
+                setModelsOpen(false);
+              }}
+              live={connection.liveModels}
+              routeDecision={host.routeDecision ?? undefined}
+            />
+          </ErrorBoundary>
+        </SheetContent>
+      </Sheet>
+
+      <Sheet open={subagentsOpen && isNarrow} onOpenChange={setSubagentsOpen}>
+        <SheetContent side="right" className="gap-0 border-border bg-card p-0 sm:max-w-xl w-full">
+          <SheetHeader className="sr-only">
+            <SheetTitle>Subagent Swarm Control Plane</SheetTitle>
+          </SheetHeader>
+          <ErrorBoundary panelName="Subagents Panel (Mobile)">
+            <Suspense fallback={<DockSkeleton label="Loading Subagents..." />}>
+              <SubagentsPanel
+                session={host}
+                onClose={() => setSubagentsOpen(false)}
+                onSelectArtifact={(p) => {
+                  setViewerFile(p);
+                  setSubagentsOpen(false);
+                }}
+              />
+            </Suspense>
+          </ErrorBoundary>
+        </SheetContent>
+      </Sheet>
+
+      {/* Connect Settings Dialog */}
+      <ErrorBoundary panelName="Connect Settings Dialog">
+        <ConnectDialog
+          open={settingsOpen}
+          onClose={() => setSettingsOpen(false)}
+          connection={connection}
+          onConnect={onConnectSubmit}
+          onDisconnect={handleDisconnect}
+          onClearHistory={() => handleClearHistory(selectedModel)}
+          onOpenIntegrations={() => setIntegrationsOpen(true)}
+          onOpenTheme={() => {
+            setSettingsOpen(false);
+            setThemeOpen(true);
+          }}
+          activeWorkspaceRoot={activeWorkspace?.location?.displayPath}
+          allowWorkspaceWrites={allowWorkspaceWrites}
+          onToggleWorkspaceWrites={onToggleWorkspaceWrites}
+        />
+      </ErrorBoundary>
+
+      {/* Theme Customizer Dialog */}
+      <Dialog open={themeOpen} onOpenChange={setThemeOpen}>
+        <DialogContent className="scrollbar-thin max-h-[85vh] overflow-y-auto border-border bg-card sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="font-mono text-[13px] tracking-wide">
+              Theme &amp; Visual Palette
+            </DialogTitle>
+            <DialogDescription className="font-mono text-[11px]">
+              Customize presets, accent colors, surface contrast, and border radius in real-time.
+            </DialogDescription>
+          </DialogHeader>
+          <ErrorBoundary panelName="Theme Customizer">
+            <Suspense fallback={<DockSkeleton label="Loading theme customizer..." />}>
+              <ThemeCustomizer onClose={() => setThemeOpen(false)} />
+            </Suspense>
+          </ErrorBoundary>
+        </DialogContent>
+      </Dialog>
+
+      {/* Integrations Dialog */}
+      <Dialog open={integrationsOpen} onOpenChange={setIntegrationsOpen}>
+        <DialogContent className="scrollbar-thin max-h-[85vh] overflow-y-auto border-border bg-card sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="font-mono text-[13px] tracking-wide">Integrations</DialogTitle>
+            <DialogDescription className="font-mono text-[11px]">
+              Rules packs, skills, and MCP servers managed by the local agent host.
+            </DialogDescription>
+          </DialogHeader>
+          <ErrorBoundary panelName="Integrations Manager">
+            <Suspense fallback={<DockSkeleton label="Loading integrations..." />}>
+              <IntegrationsPanel
+                plugins={[]}
+                rulesPacks={host.integrations.rulesPacks}
+                skills={host.integrations.skills}
+                mcpServers={host.integrations.mcpServers}
+                onToggleRulesPack={host.toggleRulesPack}
+                onToggleSkill={host.toggleSkill}
+                onToggleMcpServer={host.toggleMcpServer}
+                onTogglePlugin={() => {}}
+              />
+            </Suspense>
+          </ErrorBoundary>
+        </DialogContent>
+      </Dialog>
+
+      {/* Browser Permission Dialog */}
+      <ErrorBoundary panelName="Browser Permission Dialog">
+        <BrowserPermissionDialog
+          request={host.permissionPending}
+          onDecide={host.decidePermission}
+        />
+      </ErrorBoundary>
+
+      {/* Ctrl/Cmd+K Model Switcher */}
+      <CommandDialog
+        open={switcherOpen}
+        onOpenChange={setSwitcherOpen}
+        title="Switch model"
+        description="Search the model catalog and press Enter to switch"
+        className="border-border bg-card"
+      >
+        <CommandInput
+          placeholder="search models…"
+          value={switcherQuery}
+          onValueChange={setSwitcherQuery}
+        />
+        <CommandList className="scrollbar-thin">
+          <CommandEmpty className="font-mono text-[12px] text-muted-foreground">
+            no models match
+          </CommandEmpty>
+          {switcherProviders.map((p) => (
+            <CommandGroup heading={p} key={p}>
+              {switcher.items
+                .filter((m) => m.provider === p)
+                .map((m) => (
+                  <CommandItem
+                    key={m.id}
+                    value={`${m.name} ${m.id}`}
+                    onSelect={() => {
+                      setSelectedModel(m.id);
+                      setSwitcherOpen(false);
+                    }}
+                    className="font-mono text-[12px]"
+                  >
+                    <span
+                      className={m.id === selectedModel ? "text-primary" : "text-foreground"}
+                    >
+                      {m.name}
+                    </span>
+                    {m.id === selectedModel && <Check className="h-3 w-3 text-primary" />}
+                    <CommandShortcut>
+                      {m.priceEstimated ? "~" : ""}${m.inputPrice.toFixed(2)}/$
+                      {m.outputPrice.toFixed(2)} · {m.contextK}k
+                    </CommandShortcut>
+                  </CommandItem>
+                ))}
+            </CommandGroup>
+          ))}
+        </CommandList>
+        {switcher.truncated && (
+          <div className="border-t border-border px-3 py-1.5 font-mono text-[10px] text-muted-foreground">
+            showing {switcher.items.length} of {switcher.total} — keep typing to narrow
+          </div>
+        )}
+      </CommandDialog>
+
+      {/* Cost Dashboard Modal */}
+      {costsOpen && (
+        <ErrorBoundary panelName="Cost Dashboard">
+          <Suspense fallback={null}>
+            <CostDashboard
+              open={costsOpen}
+              onOpenChange={setCostsOpen}
+              runs={runs}
+              models={models}
+              usage={usage}
+            />
+          </Suspense>
+        </ErrorBoundary>
+      )}
+
+      {/* Image Generation Panel Modal */}
+      {imagesOpen && (
+        <ErrorBoundary panelName="Image Generation Panel">
+          <Suspense fallback={null}>
+            <ImagePanel
+              open={imagesOpen}
+              onOpenChange={setImagesOpen}
+              baseUrl={connection.baseUrl}
+              apiKey={connection.apiKey}
+              connected={connected}
+              onOpenSettings={() => setSettingsOpen(true)}
+            />
+          </Suspense>
+        </ErrorBoundary>
+      )}
+
+      {/* File Viewer Overlay Modal */}
+      {displayedViewer && (
+        <div
+          className="fixed inset-0 z-40 flex items-center justify-center bg-black/70 p-6"
+          onClick={() => { setViewerFile(null); setRemoteViewer(null); }}
+        >
+          <div
+            className="flex max-h-[80vh] w-full max-w-2xl flex-col overflow-hidden rounded-lg border border-border bg-card"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-2 border-b border-border px-4 py-2.5">
+              <span className="font-mono text-[12px] text-foreground">{displayedViewer.path}</span>
+              <span className="micro-label">{displayedViewer.language}</span>
+              <div className="flex-1" />
+              <button
+                onClick={() => { setViewerFile(null); setRemoteViewer(null); }}
+                className="rounded p-1 text-muted-foreground hover:text-foreground"
+                aria-label="Close"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <pre className="scrollbar-thin flex-1 overflow-auto bg-black/30 p-4 font-mono text-[12px] leading-relaxed text-foreground/85">
+              <code>
+                <HighlightedCode code={displayedViewer.content} lang={displayedViewer.language} />
+              </code>
+            </pre>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

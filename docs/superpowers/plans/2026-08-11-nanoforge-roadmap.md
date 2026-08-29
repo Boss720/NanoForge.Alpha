@@ -145,211 +145,61 @@ Current verification: `npm run lint`, host/protocol typechecks, production build
   - Produces: `extractPatch(markdown: string): Patch | null` — finds a fenced `diff`/`patch` block, parses `+`/`-`/` ` lines, reads target file from a leading `--- file: path` line or the fence info string.
 - [x] Failing tests for: diff fence with file header; plain fence; no fence → null.
 - [x] Update `AGENT_SYSTEM_PROMPT` to require: *"When changing code, emit one ```diff fence whose first line is `--- file: <path>`"*."
-- [x] On live `onDone`, run `extractPatch`; if found attach to th…30823 tokens truncated…ls, milestones, hypotheses, and active modified workspace files.
- */
+- [x] On live `onDone`, run `extractPatch`; if found attach to the message so `PatchCard` renders with Apply/Reject (which now mutates the vfs from Task 1.1). Commit.
 
-import { escapeXml, unescapeXml } from "../prompt/xmlFormatter";
+### Task 2.2: Multi-turn edit-verify loop
 
-export type MilestoneStatus = "pending" | "in_progress" | "completed" | "failed";
+**Files:**
+- Create: `src/lib/agentLoop.ts`
+- Modify: `src/App.tsx`
 
-export interface Milestone {
-  id: string;
-  title: string;
-  status: MilestoneStatus;
-}
+- Behavior: after a patch is applied in live mode, auto-send a verification turn: *"Patch applied to `<file>`. New content:\n```\n<content>\n```\nReview for breakage; reply `LGTM` or emit a follow-up diff."* Cap at 2 auto-turns (`maxAutoTurns` constant), show auto-turns as collapsed system messages.
+- [x] Test: loop stops after `LGTM`; stops at cap; never fires in demo mode or when patch rejected.
+- [x] Implement; build green; commit.
 
-export interface Hypothesis {
-  id: string;
-  text: string;
-  verified: boolean;
-}
+### Task 2.3: Generation controls
 
-export type FileMutationStatus = "clean" | "dirty" | "deleted";
+**Files:** Modify `src/lib/nanogpt.ts` (`streamChat` accepts `options: { temperature?: number; maxTokens?: number }`), `src/sections/ChatPanel.tsx` composer popover, `src/App.tsx` (persist per-model prefs in localStorage `nanoforge.genprefs`)
 
-export interface ActiveFileState {
-  path: string;
-  status: FileMutationStatus;
-}
+- [x] Slider for temperature (0–1.5, default 0.3 for coding) + max tokens cap; passed through to request body. Commit.
 
-export interface ScratchpadState {
-  version: "1.0";
-  goal: string;
-  milestones: Milestone[];
-  hypotheses: Hypothesis[];
-  activeFiles: ActiveFileState[];
-}
+## Phase 3 — Persistence + QoL · ~2 sessions
 
-export function createEmptyScratchpad(goal = ""): ScratchpadState {
-  return {
-    version: "1.0",
-    goal,
-    milestones: [],
-    hypotheses: [],
-    activeFiles: [],
-  };
-}
+### Task 3.1: Session persistence
 
-export function serializeScratchpad(state: ScratchpadState): string {
-  const milestonesXml = state.milestones
-    .map(
-      (m) =>
-        `    <milestone id="${escapeXml(m.id)}" status="${escapeXml(m.status)}">${escapeXml(m.title)}</milestone>`
-    )
-    .join("\n");
+**Files:** Create `src/lib/persist.ts` + tests; Modify `src/App.tsx`
 
-  const hypothesesXml = state.hypotheses
-    .map(
-      (h) =>
-        `    <hypothesis id="${escapeXml(h.id)}" verified="${h.verified ? "true" : "false"}">${escapeXml(h.text)}</hypothesis>`
-    )
-    .join("\n");
+- Serialize `sessions`, `usage`, `files` (vfs) to localStorage under `nanoforge.v1` (debounced 500ms on change); version field for future migration; "Clear history" button in ConnectDialog footer.
+- [x] Tests: round-trip; corrupted JSON → fresh state; version mismatch → fresh state. Commit.
 
-  const filesXml = state.activeFiles
-    .map(
-      (f) =>
-        `    <file path="${escapeXml(f.path)}" status="${escapeXml(f.status)}" />`
-    )
-    .join("\n");
+### Task 3.2: Responsive layout
 
-  return [
-    `<scratchpad version="1.0">`,
-    `  <goal>${escapeXml(state.goal)}</goal>`,
-    `  <milestones>`,
-    milestonesXml,
-    `  </milestones>`,
-    `  <hypotheses>`,
-    hypothesesXml,
-    `  </hypotheses>`,
-    `  <active_files>`,
-    filesXml,
-    `  </active_files>`,
-    `</scratchpad>`,
-  ].join("\n");
-}
+**Files:** Modify `src/App.tsx`, `src/sections/Sidebar.tsx`, `src/sections/ModelPanel.tsx`
 
-export function parseScratchpad(xml: string): ScratchpadState | null {
-  if (!xml || typeof xml !== "string") return null;
+- `< lg:` both rails become overlay drawers (hamburger buttons in TopBar); composer stays full-width. Use existing `hidden`/`lg:flex` Tailwind breakpoints + a small `useMediaQuery` hook in `src/hooks/`.
+- [x] Manual check at 390px and 768px widths. Commit.
 
-  const scratchpadMatch = xml.match(/<scratchpad(?:\s+version="([^"]*)")?>([\s\S]*?)<\/scratchpad>/i);
-  if (!scratchpadMatch) return null;
+### Task 3.3: Transcript export + QoL batch
 
-  const body = scratchpadMatch[2];
+**Files:** Modify `src/sections/TopBar.tsx`, create `src/lib/exporter.ts`
 
-  // Extract goal
-  const goalMatch = body.match(/<goal>([\s\S]*?)<\/goal>/i);
-  const goal = goalMatch ? unescapeXml(goalMatch[1].trim()) : "";
+- [x] Export active session as Markdown (messages + diffs as fences) → download blob.
+- [x] `Ctrl/Cmd+K` model quick-switcher (reuse ModelPanel filtered list in a command dialog).
+- [x] Session rename (double-click title in Sidebar) + delete (hover ×).
+- [x] Syntax highlighting in file viewer + RichText code blocks via a tiny tokenizer (keywords/strings/comments for ts/json/md — no new dependency).
+- [x] Commit.
 
-  // Extract milestones
-  const milestones: Milestone[] = [];
-  const milestoneRegex = /<milestone\s+id="([^"]*)"\s+status="([^"]*)">([\s\S]*?)<\/milestone>/gi;
-  let mMatch: RegExpExecArray | null;
-  while ((mMatch = milestoneRegex.exec(body)) !== null) {
-    const status = mMatch[2].toLowerCase() as MilestoneStatus;
-    milestones.push({
-      id: unescapeXml(mMatch[1]),
-      status: ["pending", "in_progress", "completed", "failed"].includes(status) ? status : "pending",
-      title: unescapeXml(mMatch[3].trim()),
-    });
-  }
+## Phase 4 — Beyond-text nano-gpt surface (optional, later)
 
-  // Extract hypotheses
-  const hypotheses: Hypothesis[] = [];
-  const hypothesisRegex = /<hypothesis\s+id="([^"]*)"\s+verified="([^"]*)">([\s\S]*?)<\/hypothesis>/gi;
-  let hMatch: RegExpExecArray | null;
-  while ((hMatch = hypothesisRegex.exec(body)) !== null) {
-    hypotheses.push({
-      id: unescapeXml(hMatch[1]),
-      verified: hMatch[2].toLowerCase() === "true",
-      text: unescapeXml(hMatch[3].trim()),
-    });
-  }
+- Image generation panel (`POST /api/generate-image`) for UI mockups inside agent runs.
+- Cost dashboard: per-model spend chart (recharts is already in deps) from persisted usage.
+- x402 accountless mode: surface the `402` quote flow for users without keys.
+- MCP note: link out to nano-gpt MCP for Claude Code/Cursor interop.
 
-  // Extract active files
-  const activeFiles: ActiveFileState[] = [];
-  const fileRegex = /<file\s+path="([^"]*)"\s+status="([^"]*)"\s*\/>/gi;
-  let fMatch: RegExpExecArray | null;
-  while ((fMatch = fileRegex.exec(body)) !== null) {
-    const status = fMatch[2].toLowerCase() as FileMutationStatus;
-    activeFiles.push({
-      path: unescapeXml(fMatch[1]),
-      status: ["clean", "dirty", "deleted"].includes(status) ? status : "clean",
-    });
-  }
+---
 
-  return {
-    version: "1.0",
-    goal,
-    milestones,
-    hypotheses,
-    activeFiles,
-  };
-}
+## Self-review
 
-export class Scratchpad {
-  private _state: ScratchpadState;
-
-  constructor(initialState?: ScratchpadState) {
-    this._state = initialState ? { ...initialState } : createEmptyScratchpad();
-  }
-
-  static parse(xml: string): Scratchpad | null {
-    const parsed = parseScratchpad(xml);
-    return parsed ? new Scratchpad(parsed) : null;
-  }
-
-  get state(): ScratchpadState {
-    return {
-      ...this._state,
-      milestones: [...this._state.milestones],
-      hypotheses: [...this._state.hypotheses],
-      activeFiles: [...this._state.activeFiles],
-    };
-  }
-
-  setGoal(goal: string): void {
-    this._state.goal = goal;
-  }
-
-  addMilestone(title: string, status: MilestoneStatus = "pending"): string {
-    const id = `ms_${this._state.milestones.length + 1}`;
-    this._state.milestones.push({ id, title, status });
-    return id;
-  }
-
-  updateMilestone(id: string, status: MilestoneStatus): boolean {
-    const ms = this._state.milestones.find((m) => m.id === id);
-    if (ms) {
-      ms.status = status;
-      return true;
-    }
-    return false;
-  }
-
-  addHypothesis(text: string, verified = false): string {
-    const id = `hyp_${this._state.hypotheses.length + 1}`;
-    this._state.hypotheses.push({ id, text, verified });
-    return id;
-  }
-
-  verifyHypothesis(id: string, verified: boolean): boolean {
-    const h = this._state.hypotheses.find((hyp) => hyp.id === id);
-    if (h) {
-      h.verified = verified;
-      return true;
-    }
-    return false;
-  }
-
-  trackFile(path: string, status: FileMutationStatus = "dirty"): void {
-    const existing = this._state.activeFiles.find((f) => f.path === path);
-    if (existing) {
-      existing.status = status;
-    } else {
-      this._state.activeFiles.push({ path, status });
-    }
-  }
-
-  serialize(): string {
-    return serializeScratchpad(this._state);
-  }
-}
+- **Coverage:** every Part-1 defect (1–5) maps to Phase 0 tasks; gaps A→Task 2.x, B→Task 1.1, C→Task 3.1, D→Task 1.2, E→Task 3.2, F→Task 1.3. ✅
+- **Type consistency:** `applyPatch/revertPatch` consume `Patch` from `src/types/index.ts`; `extractPatch` produces the same `Patch`; `buildContext` consumes `Message`. No signature drift.
+- **Placeholders:** Phase 4 is intentionally epics-only (future scope, not committed work); Phases 0–3 have concrete files, interfaces, and steps.
