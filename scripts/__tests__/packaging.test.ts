@@ -202,7 +202,10 @@ describe("NanoForge Packaging & Launcher System", () => {
     it("assembles the complete release bundle structure", async () => {
       const result = await packageRelease({
         version: "0.6.0",
-        skipBuild: true,
+        // A clean checkout has no bundled host yet. Exercise the complete
+        // packaging path instead of asserting that a skipped build produced
+        // server.mjs and agent-host.mjs.
+        skipBuild: false,
         dryRun: false,
       });
 
